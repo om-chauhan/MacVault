@@ -187,8 +187,14 @@ struct RecommendationsCard: View {
             if let fraction = v.usedFraction, fraction >= 0.9, let available = v.availableBytes {
                 result.append(Item(id: "low-\(v.id)", symbol: "exclamationmark.triangle",
                                    title: "\(v.displayName) has \(bytes(available)) available",
-                                   detail: "More than 90% of this volume is in use (system-reported). Scanning large folders can show what takes space.",
+                                   detail: "More than 90% of this volume is in use (system-reported). Scanning large folders shows what takes space; the Cleaner lists caches and logs you can review.",
                                    actionTitle: "Open Analyzer", action: { model.selection = .analyzer }))
+                if v.mountPath == "/" {
+                    result.append(Item(id: "cleaner-\(v.id)", symbol: "sparkles.rectangle.stack",
+                                       title: "Review caches, logs and developer files",
+                                       detail: "Nothing is removed until you approve a list. Approved items go to the Trash.",
+                                       actionTitle: "Open Cleaner", action: { model.selection = .cleaner }))
+                }
             }
         }
         if model.access.locations.isEmpty {

@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 import MacVaultCore
 
 struct ActivityView: View {
@@ -7,6 +9,7 @@ struct ActivityView: View {
     @State private var minimumSeverity: AuditSeverity? = nil
     @State private var selection: AuditEvent.ID?
     @State private var sortOrder = [KeyPathComparator(\AuditEvent.createdAt, order: .reverse)]
+    @State private var exportError: String?
 
     private var events: [AuditEvent] { model.recentEvents.sorted(using: sortOrder) }
     private var selected: AuditEvent? { model.recentEvents.first { $0.id == selection } }
@@ -26,13 +29,27 @@ struct ActivityView: View {
                 }
                 .fixedSize()
                 Spacer()
-                Button("Export…") {}
-                    .disabled(true)
-                    .help("Planned: JSON/CSV export with path redaction")
+                Menu("Export") {
+                    Section("Home folder replaced with ~") {
+                        Button("JSON…") { export(.json, .homeFolder) }
+                        Button("CSV…") { export(.csv, .homeFolder) }
+                    }
+                    Section("Full paths") {
+                        Button("JSON with Full Paths…") { export(.json, .none) }
+                        Button("CSV with Full Paths…") { export(.csv, .none) }
+                    }
+                }
+                .fixedSize()
+                .disabled(model.store == nil)
+                .help("Exports the whole activity log. Redacted exports replace your home folder and account name.")
             }
             .padding(.horizontal, Spacing.l)
             .padding(.vertical, Spacing.s)
             Divider()
+            if let exportError {
+                InlineBanner(kind: .error, title: "Export failed", message: exportError, actionTitle: "Dismiss") { self.exportError = nil }
+                    .padding(Spacing.s)
+            }
 
             if model.store == nil {
                 ContentUnavailableView("Activity log unavailable", systemImage: "exclamationmark.triangle",
@@ -71,6 +88,18 @@ struct ActivityView: View {
         .onChange(of: minimumSeverity) { _, _ in reload() }
         .onChange(of: search) { _, newValue in if newValue.isEmpty { reload() } }
         .task { reload() }
+    }
+
+    private func export(_ format: ActivityExporter.Format, _ redaction: ActivityExporter.Redaction) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "MacVault Activity \(Date().formatted(.iso8601.year().month().day())).\(format.fileExtension)"
+        panel.allowedContentTypes = [format == .json ? .json : .commaSeparatedText]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            exportError = await model.exportActivity(format: format, redaction: redaction, to: url)
+            reload()
+        }
     }
 
     private func reload() {

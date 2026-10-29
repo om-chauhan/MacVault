@@ -39,6 +39,9 @@ public struct FilesystemScanner: Sendable {
 
         var counters = ScanCounters()
         var topLevel: [DirectoryAggregate] = []
+        var tree: [TreeNode] = []
+        // Hard cap on nodes tracked in memory; deeper directories then roll into their nearest tracked ancestor.
+        let treeTrackingCap = max(config.maxTreeNodes * 25, 10_000)
         var largeFiles: [LargeFileRecord] = []
         var issues: [ScanIssue] = []
         var issueCount = 0
@@ -71,10 +74,11 @@ public struct FilesystemScanner: Sendable {
             )
         }
 
-        // Stack entries: (directory path, index into topLevel or nil for the root itself)
-        var stack: [(path: String, top: Int?)] = [(root, nil)]
+        // Stack entries: directory path, index into topLevel (nil for the root itself), depth below the root,
+        // and indices of the tree nodes that this directory's contents roll up into.
+        var stack: [(path: String, top: Int?, depth: Int, chain: [Int])] = [(root, nil, 0, [])]
 
-        traversal: while let (dir, topIndex) = stack.popLast() {
+        traversal: while let (dir, topIndex, depth, chain) = stack.popLast() {
             if Task.isCancelled { cancelled = true; break }
 
             let listing: DirectoryListing
@@ -82,6 +86,7 @@ public struct FilesystemScanner: Sendable {
             case .failure(let failure):
                 counters.inaccessibleItems += 1
                 if let topIndex { topLevel[topIndex].inaccessibleItems += 1 }
+                for node in chain { tree[node].inaccessibleItems += 1 }
                 record(ScanIssue(path: dir, kind: .unreadableDirectory, errorCode: failure.code))
                 continue traversal
             case .success(let value):
@@ -92,6 +97,7 @@ public struct FilesystemScanner: Sendable {
             if listing.undecodableCount > 0 {
                 counters.otherErrors += listing.undecodableCount
                 if let topIndex { topLevel[topIndex].inaccessibleItems += listing.undecodableCount }
+                for node in chain { tree[node].inaccessibleItems += listing.undecodableCount }
                 record(ScanIssue(path: dir, kind: .undecodableName, errorCode: nil))
             }
 
@@ -108,6 +114,7 @@ public struct FilesystemScanner: Sendable {
                 case .failure(let failure):
                     counters.inaccessibleItems += 1
                     if let topIndex { topLevel[topIndex].inaccessibleItems += 1 }
+                    for node in chain { tree[node].inaccessibleItems += 1 }
                     record(ScanIssue(path: path, kind: .metadataUnavailable, errorCode: failure.code))
                     continue
                 case .success(let value):
@@ -130,12 +137,18 @@ public struct FilesystemScanner: Sendable {
                         counters.mountPointsSkipped += 1
                         record(ScanIssue(path: path, kind: .mountPointSkipped, errorCode: nil))
                     } else {
-                        stack.append((path, top))
+                        var childChain = chain
+                        if depth + 1 <= config.maxTreeDepth && tree.count < treeTrackingCap {
+                            tree.append(TreeNode(path: path, parentPath: depth == 0 ? nil : dir, name: name, depth: depth + 1))
+                            childChain.append(tree.count - 1)
+                        }
+                        stack.append((path, top, depth + 1, childChain))
                     }
 
                 case .regular:
                     counters.filesVisited += 1
                     topLevel[top].fileCount += 1
+                    for node in chain { tree[node].fileCount += 1 }
                     if st.linkCount > 1 && !seenHardLinks.insert(st.resourceIdentifier).inserted {
                         counters.hardLinkRepeats += 1
                         break
@@ -144,6 +157,10 @@ public struct FilesystemScanner: Sendable {
                     counters.allocatedBytes += st.allocatedSize
                     topLevel[top].logicalBytes += st.logicalSize
                     topLevel[top].allocatedBytes += st.allocatedSize
+                    for node in chain {
+                        tree[node].logicalBytes += st.logicalSize
+                        tree[node].allocatedBytes += st.allocatedSize
+                    }
 
                     if st.logicalSize >= config.largeFileThresholdBytes {
                         largeFiles.append(LargeFileRecord(
@@ -184,6 +201,7 @@ public struct FilesystemScanner: Sendable {
 
         trimLargeFiles()
         topLevel.sort { $0.logicalBytes > $1.logicalBytes }
+        let keptTree = Self.pruneTree(tree, limit: config.maxTreeNodes)
 
         let status: ScanStatus
         if cancelled {
@@ -203,11 +221,24 @@ public struct FilesystemScanner: Sendable {
             counters: counters,
             largeFiles: largeFiles,
             topLevel: topLevel,
+            tree: keptTree,
             issues: issues,
             issueCount: issueCount,
             startedAt: startedAt,
             finishedAt: Date()
         )
+    }
+
+    /// Keeps the `limit` largest nodes. A directory's rolled-up size is never smaller than any of its
+    /// descendants', so ordering by (size desc, depth asc) places every ancestor before its descendants
+    /// and the kept set is always closed under "parent of".
+    static func pruneTree(_ nodes: [TreeNode], limit: Int) -> [TreeNode] {
+        let sorted = nodes.sorted {
+            if $0.logicalBytes != $1.logicalBytes { return $0.logicalBytes > $1.logicalBytes }
+            if $0.depth != $1.depth { return $0.depth < $1.depth }
+            return $0.path < $1.path
+        }
+        return Array(sorted.prefix(limit))
     }
 
     static func seconds(_ duration: Duration) -> Double {

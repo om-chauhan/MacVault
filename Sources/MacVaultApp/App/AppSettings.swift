@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import MacVaultCore
 
 @MainActor
 @Observable
@@ -19,6 +20,30 @@ final class AppSettings {
         didSet { defaults.set(keepScans, forKey: "keepScans") }
     }
 
+    // Monitoring
+    var scanSchedule: ScanSchedule {
+        didSet { defaults.set(scanSchedule.rawValue, forKey: "scanSchedule") }
+    }
+    var lastScheduledScan: Date? {
+        didSet { defaults.set(lastScheduledScan, forKey: "lastScheduledScan") }
+    }
+    var notifyScheduledScans: Bool {
+        didSet { defaults.set(notifyScheduledScans, forKey: "notifyScheduledScans") }
+    }
+    var lowStorageAlerts: Bool {
+        didSet { defaults.set(lowStorageAlerts, forKey: "lowStorageAlerts") }
+    }
+    var lowStorageThresholdPercent: Int {
+        didSet { defaults.set(lowStorageThresholdPercent, forKey: "lowStorageThresholdPercent") }
+    }
+    /// Volumes with an outstanding low-space warning (re-armed when space recovers).
+    var lowStorageWarnedVolumes: [String] {
+        didSet { defaults.set(lowStorageWarnedVolumes, forKey: "lowStorageWarnedVolumes") }
+    }
+    var showMenuBarExtra: Bool {
+        didSet { defaults.set(showMenuBarExtra, forKey: "showMenuBarExtra") }
+    }
+
     init() {
         let threshold = defaults.integer(forKey: "largeFileThresholdMB")
         largeFileThresholdMB = threshold > 0 ? threshold : 100
@@ -26,6 +51,14 @@ final class AppSettings {
         crossMountPoints = defaults.bool(forKey: "crossMountPoints")
         let keep = defaults.integer(forKey: "keepScans")
         keepScans = keep > 0 ? keep : 20
+        scanSchedule = defaults.string(forKey: "scanSchedule").flatMap(ScanSchedule.init(rawValue:)) ?? .off
+        lastScheduledScan = defaults.object(forKey: "lastScheduledScan") as? Date
+        notifyScheduledScans = defaults.object(forKey: "notifyScheduledScans") as? Bool ?? false
+        lowStorageAlerts = defaults.object(forKey: "lowStorageAlerts") as? Bool ?? false
+        let percent = defaults.integer(forKey: "lowStorageThresholdPercent")
+        lowStorageThresholdPercent = (1...50).contains(percent) ? percent : 10
+        lowStorageWarnedVolumes = defaults.stringArray(forKey: "lowStorageWarnedVolumes") ?? []
+        showMenuBarExtra = defaults.object(forKey: "showMenuBarExtra") as? Bool ?? true
     }
 
     var largeFileThresholdBytes: Int64 { Int64(largeFileThresholdMB) * 1_000_000 }

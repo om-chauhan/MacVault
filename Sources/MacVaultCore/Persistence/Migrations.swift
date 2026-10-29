@@ -157,7 +157,41 @@ public enum Migrations {
     CREATE INDEX idx_scans_started ON scan_sessions(started_at);
     """)
 
-    public static let all: [Migration] = [v1, v2]
+    /// v3: drill-down tree, review/approval detail for operations, application inventory keys.
+    public static let v3 = Migration(version: 3, name: "operations_and_tree", sql: """
+    CREATE TABLE scan_tree_nodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scan_id TEXT NOT NULL REFERENCES scan_sessions(id) ON DELETE CASCADE,
+        path TEXT NOT NULL,
+        parent_path TEXT,
+        name TEXT NOT NULL,
+        depth INTEGER NOT NULL,
+        logical_bytes INTEGER NOT NULL,
+        allocated_bytes INTEGER NOT NULL,
+        file_count INTEGER NOT NULL,
+        inaccessible_items INTEGER NOT NULL
+    );
+    CREATE INDEX idx_tree_scan_parent ON scan_tree_nodes(scan_id, parent_path);
+
+    ALTER TABLE operation_manifests ADD COLUMN title TEXT;
+    ALTER TABLE operation_manifests ADD COLUMN failure_reason TEXT;
+
+    ALTER TABLE operation_items ADD COLUMN rule_id TEXT;
+    ALTER TABLE operation_items ADD COLUMN risk_level TEXT;
+    ALTER TABLE operation_items ADD COLUMN reason TEXT;
+    ALTER TABLE operation_items ADD COLUMN scope_root TEXT;
+    ALTER TABLE operation_items ADD COLUMN content_hash TEXT;
+    ALTER TABLE operation_items ADD COLUMN keeper_path TEXT;
+    ALTER TABLE operation_items ADD COLUMN message TEXT;
+    ALTER TABLE operation_items ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
+    CREATE INDEX idx_operation_items_manifest ON operation_items(manifest_id, position);
+    CREATE INDEX idx_manifests_created ON operation_manifests(created_at);
+
+    ALTER TABLE applications ADD COLUMN is_protected INTEGER NOT NULL DEFAULT 0;
+    CREATE UNIQUE INDEX idx_applications_path ON applications(bundle_path);
+    """)
+
+    public static let all: [Migration] = [v1, v2, v3]
 
     static func currentVersion(_ db: SQLiteConnection) throws -> Int {
         try db.execute("""

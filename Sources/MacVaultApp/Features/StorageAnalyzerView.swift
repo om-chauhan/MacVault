@@ -9,6 +9,7 @@ struct StorageAnalyzerView: View {
     enum Mode: String, CaseIterable, Identifiable {
         case largest = "Largest Files"
         case breakdown = "Breakdown"
+        case treemap = "Treemap"
         var id: String { rawValue }
     }
 
@@ -114,12 +115,13 @@ struct StorageAnalyzerView: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .frame(maxWidth: 320)
+                    .frame(maxWidth: 400)
 
                     switch mode {
                     case .largest: LargestFilesTable(findings: model.displayedFindings, search: $search,
                                                      thresholdBytes: model.settings.largeFileThresholdBytes)
-                    case .breakdown: BreakdownList(entries: model.displayedAggregates, scan: scan)
+                    case .breakdown: DrillDownBreakdown(scan: scan, aggregates: model.displayedAggregates, style: .list)
+                    case .treemap: DrillDownBreakdown(scan: scan, aggregates: model.displayedAggregates, style: .treemap)
                     }
                 } else if !model.isScanning {
                     ContentUnavailableView {
@@ -384,68 +386,6 @@ struct FileDetailSheet: View {
         }
         .padding(Spacing.l)
         .frame(width: 520)
-    }
-}
-
-// MARK: - Breakdown
-
-struct BreakdownList: View {
-    let entries: [DirectoryAggregate]
-    let scan: ScanSessionRecord
-
-    var body: some View {
-        if entries.isEmpty {
-            ContentUnavailableView("Nothing measured", systemImage: "folder",
-                                   description: Text("This folder had no readable items when it was scanned."))
-        } else {
-            let maxBytes = max(entries.map(\.logicalBytes).max() ?? 1, 1)
-            List {
-                Section {
-                    ForEach(entries) { entry in
-                        BreakdownRow(entry: entry, fraction: Double(entry.logicalBytes) / Double(maxBytes))
-                            .contextMenu {
-                                Button("Reveal in Finder") { FinderActions.reveal([entry.path]) }
-                                Button("Copy Path") { FinderActions.copy([entry.path]) }
-                            }
-                    }
-                } footer: {
-                    Text("Immediate contents of \(scan.scopeDescription), sized from measured files. Entries marked “lower bound” contain items that could not be read. Interactive treemap and drill-down are planned.")
-                        .font(.caption).foregroundStyle(.tertiary)
-                }
-            }
-            .listStyle(.inset(alternatesRowBackgrounds: true))
-        }
-    }
-}
-
-struct BreakdownRow: View {
-    let entry: DirectoryAggregate
-    let fraction: Double
-
-    var body: some View {
-        HStack(spacing: Spacing.s) {
-            Image(systemName: entry.isDirectory ? "folder.fill" : "doc").foregroundStyle(entry.isDirectory ? Color.accentColor : .secondary)
-                .frame(width: 18).accessibilityHidden(true)
-            Text(entry.name).lineLimit(1).truncationMode(.middle).frame(minWidth: 140, maxWidth: 260, alignment: .leading)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.secondary.opacity(0.12))
-                    Capsule().fill(Color.accentColor.opacity(0.75)).frame(width: max(2, geo.size.width * fraction))
-                }
-            }
-            .frame(height: 6)
-            .accessibilityHidden(true)
-            Text(ByteFormat.string(entry.logicalBytes)).monospacedDigit().frame(width: 90, alignment: .trailing)
-            Text(entry.isDirectory ? "\(entry.fileCount.formatted()) files" : "")
-                .font(.caption).foregroundStyle(.secondary).frame(width: 90, alignment: .trailing)
-            if !entry.isComplete {
-                StatusBadge(text: "Lower bound", symbol: "eye.slash", tint: .orange)
-                    .help("\(entry.inaccessibleItems) item(s) inside could not be read")
-            }
-        }
-        .padding(.vertical, 2)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(entry.name), \(ByteFormat.string(entry.logicalBytes))\(entry.isComplete ? "" : ", lower bound, \(entry.inaccessibleItems) items not readable")")
     }
 }
 

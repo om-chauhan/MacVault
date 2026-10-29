@@ -48,6 +48,10 @@ public struct ScanConfiguration: Sendable, Equatable {
     public var progressInterval: Double
     /// Upper bound on individual issues retained (all issues are still counted).
     public var maxRecordedIssues: Int
+    /// Directories up to this depth below the root get their own rolled-up size for drill-down (0 disables).
+    public var maxTreeDepth: Int
+    /// Upper bound on tree nodes kept in the result; the largest are kept, always with their ancestors.
+    public var maxTreeNodes: Int
 
     public init(
         rootPath: String,
@@ -56,7 +60,9 @@ public struct ScanConfiguration: Sendable, Equatable {
         maxLargeFileFindings: Int = 500,
         crossMountPoints: Bool = false,
         progressInterval: Double = 0.25,
-        maxRecordedIssues: Int = 200
+        maxRecordedIssues: Int = 200,
+        maxTreeDepth: Int = 4,
+        maxTreeNodes: Int = 4000
     ) {
         self.rootPath = PathUtilities.canonicalize(rootPath)
         self.exclusions = exclusions.map(PathUtilities.canonicalize).filter { !$0.isEmpty }
@@ -65,6 +71,8 @@ public struct ScanConfiguration: Sendable, Equatable {
         self.crossMountPoints = crossMountPoints
         self.progressInterval = max(0, progressInterval)
         self.maxRecordedIssues = max(0, maxRecordedIssues)
+        self.maxTreeDepth = max(0, maxTreeDepth)
+        self.maxTreeNodes = max(0, maxTreeNodes)
     }
 
     public func isExcluded(_ path: String) -> Bool {
@@ -188,6 +196,36 @@ public struct DirectoryAggregate: Sendable, Equatable, Identifiable {
     public var isComplete: Bool { inaccessibleItems == 0 }
 }
 
+/// Rolled-up size of a directory below the scan root, used for drill-down and the treemap.
+/// Sizes include everything measured beneath the directory (hard links counted once per scan).
+public struct TreeNode: Sendable, Equatable, Identifiable {
+    public var id: String { path }
+    public let path: String
+    /// Nil for depth-1 nodes (their parent is the scan root).
+    public let parentPath: String?
+    public let name: String
+    /// 1 = immediate child of the scan root.
+    public let depth: Int
+    public var logicalBytes: Int64
+    public var allocatedBytes: Int64
+    public var fileCount: Int
+    public var inaccessibleItems: Int
+
+    public init(path: String, parentPath: String?, name: String, depth: Int, logicalBytes: Int64 = 0,
+                allocatedBytes: Int64 = 0, fileCount: Int = 0, inaccessibleItems: Int = 0) {
+        self.path = path
+        self.parentPath = parentPath
+        self.name = name
+        self.depth = depth
+        self.logicalBytes = logicalBytes
+        self.allocatedBytes = allocatedBytes
+        self.fileCount = fileCount
+        self.inaccessibleItems = inaccessibleItems
+    }
+
+    public var isComplete: Bool { inaccessibleItems == 0 }
+}
+
 public struct ScanResult: Sendable {
     public let rootPath: String
     public let status: ScanStatus
@@ -196,6 +234,9 @@ public struct ScanResult: Sendable {
     public let largeFiles: [LargeFileRecord]
     /// Immediate children of the root, sorted by logical size, descending.
     public let topLevel: [DirectoryAggregate]
+    /// Directory tree for drill-down, bounded by `maxTreeDepth`/`maxTreeNodes`. Sorted by size, descending;
+    /// every node's ancestors are included.
+    public let tree: [TreeNode]
     /// First `maxRecordedIssues` issues.
     public let issues: [ScanIssue]
     /// Total issues encountered (may exceed `issues.count`).

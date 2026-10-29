@@ -2,7 +2,7 @@ import Foundation
 
 /// The only component that touches SQLite. All access is serialized by the actor.
 public actor Store {
-    private let db: SQLiteConnection
+    let db: SQLiteConnection
     public nonisolated let path: String
 
     public init(path: String) throws {
@@ -153,6 +153,17 @@ public actor Store {
                                 item.errorCode.map { .integer(Int64($0)) } ?? .null])
                 _ = try issue.step()
             }
+
+            let node = try db.prepare("""
+            INSERT INTO scan_tree_nodes (scan_id, path, parent_path, name, depth, logical_bytes, allocated_bytes,
+                file_count, inaccessible_items) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """)
+            for entry in result.tree {
+                try node.bind([.text(id), .text(entry.path), .string(entry.parentPath), .text(entry.name),
+                               .integer(Int64(entry.depth)), .integer(entry.logicalBytes), .integer(entry.allocatedBytes),
+                               .integer(Int64(entry.fileCount)), .integer(Int64(entry.inaccessibleItems))])
+                _ = try node.step()
+            }
         }
     }
 
@@ -246,6 +257,33 @@ public actor Store {
         }
     }
 
+    /// Children of `parentPath` in the drill-down tree (nil = immediate children of the scan root), largest first.
+    public func treeNodes(scanId: String, parentPath: String?) throws -> [TreeNode] {
+        let condition = parentPath == nil ? "parent_path IS NULL" : "parent_path = ?"
+        var values: [SQLValue] = [.text(scanId)]
+        if let parentPath { values.append(.text(parentPath)) }
+        return try db.query("""
+        SELECT path, parent_path, name, depth, logical_bytes, allocated_bytes, file_count, inaccessible_items
+        FROM scan_tree_nodes WHERE scan_id = ? AND \(condition) ORDER BY logical_bytes DESC, path
+        """, values) { row in
+            TreeNode(path: try row.requiredString(0, "path"), parentPath: row.string(1), name: try row.requiredString(2, "name"),
+                     depth: row.int(3) ?? 0, logicalBytes: row.int64(4) ?? 0, allocatedBytes: row.int64(5) ?? 0,
+                     fileCount: row.int(6) ?? 0, inaccessibleItems: row.int(7) ?? 0)
+        }
+    }
+
+    /// One tree node by path, or nil when it was not kept.
+    public func treeNode(scanId: String, path: String) throws -> TreeNode? {
+        try db.query("""
+        SELECT path, parent_path, name, depth, logical_bytes, allocated_bytes, file_count, inaccessible_items
+        FROM scan_tree_nodes WHERE scan_id = ? AND path = ?
+        """, [.text(scanId), .text(path)]) { row in
+            TreeNode(path: try row.requiredString(0, "path"), parentPath: row.string(1), name: try row.requiredString(2, "name"),
+                     depth: row.int(3) ?? 0, logicalBytes: row.int64(4) ?? 0, allocatedBytes: row.int64(5) ?? 0,
+                     fileCount: row.int(6) ?? 0, inaccessibleItems: row.int(7) ?? 0)
+        }.first
+    }
+
     // MARK: Retention
 
     /// Deletes all but the newest `keepLatest` finished scans (running scans are never pruned).
@@ -266,6 +304,7 @@ public actor Store {
         try db.run("DELETE FROM file_findings WHERE scan_id = ?", [.text(id)])
         try db.run("DELETE FROM scan_directory_aggregates WHERE scan_id = ?", [.text(id)])
         try db.run("DELETE FROM scan_issues WHERE scan_id = ?", [.text(id)])
+        try db.run("DELETE FROM scan_tree_nodes WHERE scan_id = ?", [.text(id)])
         try db.run("UPDATE storage_snapshots SET scan_id = NULL, scanned_scope_bytes = NULL WHERE scan_id = ?", [.text(id)])
         try db.run("DELETE FROM scan_sessions WHERE id = ?", [.text(id)])
     }
@@ -277,6 +316,7 @@ public actor Store {
             DELETE FROM file_findings;
             DELETE FROM scan_directory_aggregates;
             DELETE FROM scan_issues;
+            DELETE FROM scan_tree_nodes;
             DELETE FROM storage_snapshots;
             DELETE FROM scan_sessions;
             """)

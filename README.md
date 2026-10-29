@@ -17,7 +17,8 @@ Sources/MacVaultCore/
   Logging/ Support/           OSLog categories, byte/time/path helpers
 Sources/MacVaultApp/          SwiftUI app (App, DesignSystem, Features)
 Tests/MacVaultCoreTests/      unit, isolated-filesystem integration, safety, perf smoke
-Config/                       entitlements per edition, PrivacyInfo.xcprivacy
+Config/                       entitlements per edition, PrivacyInfo.xcprivacy, Assets.xcassets (AppIcon)
+Scripts/generate-icon.swift   regenerates the AppIcon set: swift Scripts/generate-icon.swift
 project.yml                   XcodeGen spec: MacVault-Direct and MacVault-AppStore schemes
 Documentation/                decisions (ADRs), capability matrix
 ```

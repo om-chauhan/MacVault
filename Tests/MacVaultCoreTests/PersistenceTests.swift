@@ -21,7 +21,7 @@ final class MigrationTests: XCTestCase {
                        [.text("old"), .text("Legacy scan"), .text("completed"), .date(Date()), .integer(42)])
         }
         let db = try SQLiteConnection(path: path)
-        XCTAssertEqual(try Migrations.migrate(db), 2)
+        XCTAssertEqual(try Migrations.migrate(db), 3)
         let files = try db.query("SELECT files_visited, symlinks_skipped, root_path FROM scan_sessions WHERE id = 'old'") {
             ($0.int(0), $0.int(1), $0.string(2))
         }
@@ -48,8 +48,8 @@ final class MigrationTests: XCTestCase {
 
     func testMigrationIsIdempotent() throws {
         let db = try SQLiteConnection(path: ":memory:")
-        XCTAssertEqual(try Migrations.migrate(db), 2)
-        XCTAssertEqual(try Migrations.migrate(db), 2)
+        XCTAssertEqual(try Migrations.migrate(db), 3)
+        XCTAssertEqual(try Migrations.migrate(db), 3)
     }
 
     func testForeignKeyIsEnforced() throws {
@@ -75,6 +75,10 @@ final class StoreTests: XCTestCase {
             ],
             topLevel: [DirectoryAggregate(name: "Movies", path: root + "/Movies", isDirectory: true,
                                           logicalBytes: 4_500, allocatedBytes: 8_000, fileCount: 7, inaccessibleItems: 1)],
+            tree: [TreeNode(path: root + "/Movies", parentPath: nil, name: "Movies", depth: 1, logicalBytes: 4_500,
+                            allocatedBytes: 8_000, fileCount: 7, inaccessibleItems: 1),
+                   TreeNode(path: root + "/Movies/2026", parentPath: root + "/Movies", name: "2026", depth: 2,
+                            logicalBytes: 4_000, allocatedBytes: 4_096, fileCount: 1)],
             issues: [ScanIssue(path: root + "/locked", kind: .unreadableDirectory, errorCode: 13)],
             issueCount: 1, startedAt: Date(), finishedAt: Date())
     }

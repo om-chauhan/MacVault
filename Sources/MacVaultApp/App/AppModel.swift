@@ -32,14 +32,6 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
         case .settings: return "gearshape"
         }
     }
-
-    /// Not implemented in this milestone; shown as "Planned" with no functional controls.
-    var isPlanned: Bool {
-        switch self {
-        case .cleaner, .applications, .duplicates, .developer: return true
-        default: return false
-        }
-    }
 }
 
 enum ScanPhase: Equatable {
@@ -82,6 +74,18 @@ final class AppModel {
     // Activity
     private(set) var recentEvents: [AuditEvent] = []
 
+    // Maintenance features. Each builds review lists; only `operations` can move items to the Trash.
+    let operations = OperationsModel()
+    let cleaner = RuleScanModel(rules: RuleCatalog.cleanerRules, operationType: .cleanup)
+    let developerCaches = RuleScanModel(rules: RuleCatalog.developerRules, operationType: .developerCleanup)
+    let projects = ProjectArtifactsModel()
+    let applications = ApplicationsModel()
+    let duplicates = DuplicatesModel()
+
+    // Monitoring
+    private var monitorTask: Task<Void, Never>?
+    private(set) var lastScheduledRun: Date?
+
     var isScanning: Bool {
         if case .running = scanPhase { return true }
         return false
@@ -105,11 +109,14 @@ final class AppModel {
             startupError = "MacVault could not open its local database. Scan history and the activity log are unavailable. (\(error.localizedDescription))"
             Log.app.error("Store open failed")
         }
+        operations.attach(store: { [weak self] in self?.store }, audit: { [weak self] event in await self?.audit(event) })
         selectedLocationID = access.locations.first?.id
         await refreshVolumes()
         await reloadScans()
         await reloadActivity()
+        await operations.reloadHistory()
         if let latest = latestScan(for: selectedLocation) { await show(scanID: latest.id) }
+        startMonitoring()
     }
 
     // MARK: Volumes
@@ -159,6 +166,12 @@ final class AppModel {
         displayedIssues = (try? await store.issues(scanId: scanID)) ?? []
     }
 
+    /// Children of `parent` (nil = scan root) in the displayed scan's drill-down tree.
+    func treeChildren(of parent: String?) async -> [TreeNode] {
+        guard let store, let scan = displayedScan else { return [] }
+        return (try? await store.treeNodes(scanId: scan.id, parentPath: parent)) ?? []
+    }
+
     func selectLocation(_ id: UUID?) async {
         selectedLocationID = id
         clearDisplayedScan()
@@ -187,19 +200,28 @@ final class AppModel {
     }
 
     func startScan() {
-        guard !isScanning, let store, let location = selectedLocation else { return }
+        guard !isScanning, let location = selectedLocation else { return }
         lastWarnings = []
+        scanTask = Task { [weak self] in
+            await self?.performScan(location, display: true)
+        }
+    }
 
+    /// Runs one read-only scan and records it. Returns true when the scan ran (any outcome but failure).
+    @discardableResult
+    private func performScan(_ location: AuthorizedLocation, display: Bool) async -> Bool {
+        guard let store else { return false }
         let scoped: ScopedAccess
         switch access.beginAccess(location) {
         case .failure(let status):
             scanPhase = .failed(status == .needsReselection
                 ? "Access to \(location.displayPath) has expired. Choose the folder again to continue."
                 : "\(location.displayPath) is not available. It may have been moved, renamed or its volume ejected.")
-            return
+            return false
         case .success(let value):
             scoped = value
         }
+        defer { scoped.stop() }
 
         var config = ScanConfiguration(
             rootPath: location.path,
@@ -210,33 +232,32 @@ final class AppModel {
 
         let service = ScanService(store: store)
         let locationID = location.id
-        let scope = location.displayPath
-        let keep = settings.keepScans
         scanPhase = .running(locationID: locationID, progress: ScanProgress())
-
-        scanTask = Task { [weak self] in
-            defer { scoped.stop() }
-            do {
-                let outcome = try await service.runScan(configuration: config, scopeDescription: scope) { progress in
-                    await MainActor.run { [weak self] in
-                        guard let self, case .running = self.scanPhase else { return }
-                        self.scanPhase = .running(locationID: locationID, progress: progress)
-                    }
-                }
-                _ = try? await store.pruneScans(keepLatest: keep)
-                guard let self else { return }
-                self.lastWarnings = outcome.warnings
-                self.scanPhase = outcome.failureMessage.map(ScanPhase.failed) ?? .idle
-                await self.reloadScans()
-                await self.show(scanID: outcome.scanId)
-                await self.reloadActivity()
-                await self.refreshVolumes()
-            } catch {
-                guard let self else { return }
-                self.scanPhase = .failed("The scan could not be recorded: \(error.localizedDescription)")
-                await self.reloadActivity()
-            }
+        let onProgress: @Sendable (ScanProgress) async -> Void = { [weak self] progress in
+            await self?.applyProgress(progress, locationID: locationID)
         }
+
+        do {
+            let outcome = try await service.runScan(configuration: config, scopeDescription: location.displayPath,
+                                                    onProgress: onProgress)
+            _ = try? await store.pruneScans(keepLatest: settings.keepScans)
+            lastWarnings += outcome.warnings
+            scanPhase = outcome.failureMessage.map(ScanPhase.failed) ?? .idle
+            await reloadScans()
+            if display || locationID == selectedLocation?.id { await show(scanID: outcome.scanId) }
+            await reloadActivity()
+            await refreshVolumes()
+            return outcome.failureMessage == nil
+        } catch {
+            scanPhase = .failed("The scan could not be recorded: \(error.localizedDescription)")
+            await reloadActivity()
+            return false
+        }
+    }
+
+    private func applyProgress(_ progress: ScanProgress, locationID: UUID) {
+        guard case .running = scanPhase else { return }
+        scanPhase = .running(locationID: locationID, progress: progress)
     }
 
     /// Cooperative: the scanner stops at its next check and the session is recorded as Cancelled.
@@ -290,5 +311,95 @@ final class AppModel {
         clearDisplayedScan()
         history = [:]
         await reloadScans()
+    }
+
+    // MARK: Monitoring
+
+    /// While MacVault is open: refreshes capacity, warns about low space, and runs scheduled read-only scans.
+    private func startMonitoring() {
+        monitorTask?.cancel()
+        monitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(600))
+                guard let self, !Task.isCancelled else { return }
+                await self.monitorTick()
+            }
+        }
+        Task { await evaluateLowStorage() }
+    }
+
+    func monitorTick() async {
+        await refreshVolumes()
+        await evaluateLowStorage()
+        if settings.scanSchedule.isDue(lastRun: settings.lastScheduledScan, now: Date()), !isScanning,
+           !access.locations.isEmpty {
+            await runScheduledScans()
+        }
+    }
+
+    /// Scans every accessible folder in turn. Read-only; a summary notification is posted when allowed.
+    func runScheduledScans() async {
+        guard !isScanning, !operations.isExecuting else { return }
+        settings.lastScheduledScan = Date()
+        let locations = access.locations.filter { access.status(of: $0) == .available }
+        await audit(AuditEvent(operationId: nil, eventType: "schedule.started", severity: .info,
+                               message: "Scheduled scan started for \(locations.count) folder(s)"))
+        let task = Task { [weak self] () -> Int in
+            var completed = 0
+            for location in locations {
+                guard let self, !Task.isCancelled else { break }
+                if await self.performScan(location, display: false) { completed += 1 }
+            }
+            return completed
+        }
+        scanTask = Task {
+            await withTaskCancellationHandler { _ = await task.value } onCancel: { task.cancel() }
+        }
+        let completed = await task.value
+        lastScheduledRun = Date()
+        if settings.notifyScheduledScans {
+            Notifier.post(id: "scheduled-scan", title: "Scheduled scan finished",
+                          body: "\(completed) of \(locations.count) folder(s) scanned. Nothing was changed.")
+        }
+    }
+
+    func evaluateLowStorage() async {
+        guard settings.lowStorageAlerts else { return }
+        let monitor = LowStorageMonitor(thresholdFraction: Double(settings.lowStorageThresholdPercent) / 100)
+        var warned = Set(settings.lowStorageWarnedVolumes)
+        for volume in volumes where volume.isReadOnly != true {
+            switch monitor.evaluate(volume, alreadyWarned: warned.contains(volume.id)) {
+            case .warn(let fraction):
+                warned.insert(volume.id)
+                let percent = (fraction * 100).formatted(.number.precision(.fractionLength(0...1)))
+                await audit(AuditEvent(operationId: nil, eventType: "storage.low", severity: .warning,
+                                       message: "\(volume.displayName) has \(bytes(volume.availableBytes)) available (\(percent)%)",
+                                       details: ["volumeId": volume.id]))
+                Notifier.post(id: "low-\(volume.id)", title: "\(volume.displayName) is low on space",
+                              body: "\(bytes(volume.availableBytes)) available (\(percent)%). Open MacVault to see what takes space.")
+            case .rearm:
+                warned.remove(volume.id)
+            case .none:
+                break
+            }
+        }
+        settings.lowStorageWarnedVolumes = Array(warned).sorted()
+    }
+
+    // MARK: Export
+
+    func exportActivity(format: ActivityExporter.Format, redaction: ActivityExporter.Redaction, to url: URL) async -> String? {
+        guard let store else { return "The activity log is unavailable." }
+        do {
+            let events = try await store.auditEvents(limit: 100_000)
+            let data = try ActivityExporter.export(events, format: format, redaction: redaction)
+            try data.write(to: url, options: .atomic)
+            await audit(AuditEvent(operationId: nil, eventType: "activity.exported", severity: .info,
+                                   message: "Activity exported: \(events.count) event(s) as \(format.rawValue.uppercased())",
+                                   details: ["redaction": redaction.rawValue]))
+            return nil
+        } catch {
+            return "Export failed: \(error.localizedDescription)"
+        }
     }
 }

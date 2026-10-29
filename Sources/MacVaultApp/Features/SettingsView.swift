@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var confirmDelete = false
     @State private var retentionMessage: String?
+    @State private var notificationNotice: String?
 
     var body: some View {
         @Bindable var settings = model.settings
@@ -112,10 +113,31 @@ struct SettingsView: View {
                 LabeledContent("Motion", value: "Follows system Reduce Motion setting")
             }
 
-            Section("Planned") {
-                ForEach(["Scheduled read-only scans", "Low-storage notifications", "Menu bar status", "Activity export (JSON/CSV)"], id: \.self) { item in
-                    HStack { Text(item).foregroundStyle(.secondary); Spacer(); StatusBadge.planned }
+            Section {
+                Picker("Scheduled read-only scans", selection: $settings.scanSchedule) {
+                    ForEach(ScanSchedule.allCases, id: \.self) { Text($0.displayName).tag($0) }
                 }
+                if settings.scanSchedule != .off {
+                    LabeledContent("Last scheduled scan", value: settings.lastScheduledScan?.shortDateTime ?? "Not yet")
+                    Toggle("Notify when a scheduled scan finishes", isOn: notificationBinding($settings.notifyScheduledScans))
+                    Button("Run Scheduled Scan Now") { Task { await model.runScheduledScans() } }
+                        .disabled(model.isScanning || model.access.locations.isEmpty)
+                }
+                Toggle("Warn when a disk is low on space", isOn: notificationBinding($settings.lowStorageAlerts))
+                if settings.lowStorageAlerts {
+                    Stepper(value: $settings.lowStorageThresholdPercent, in: 1...50) {
+                        LabeledContent("Warn below", value: "\(settings.lowStorageThresholdPercent)% available")
+                    }
+                }
+                Toggle("Show MacVault in the menu bar", isOn: $settings.showMenuBarExtra)
+                if let notice = notificationNotice {
+                    Text(notice).font(.caption).foregroundStyle(.orange)
+                }
+            } header: {
+                Text("Monitoring")
+            } footer: {
+                Text("Scheduled scans and storage checks run only while MacVault is open (including from the menu bar). They only read: nothing is ever moved or deleted automatically. Every warning is also recorded in Activity.")
+                    .font(.caption)
             }
 
             Section("About") {
@@ -132,6 +154,24 @@ struct SettingsView: View {
         } message: {
             Text("All scan sessions, findings and storage history will be removed from MacVault’s database. This cannot be undone. No files on your disk are changed.")
         }
+    }
+
+    /// Turning on an option that notifies asks macOS for permission first; the option stays on either way
+    /// (events are still recorded in Activity).
+    private func notificationBinding(_ binding: Binding<Bool>) -> Binding<Bool> {
+        Binding(get: { binding.wrappedValue }, set: { newValue in
+            binding.wrappedValue = newValue
+            guard newValue else { return }
+            Task {
+                if !Notifier.isAvailable {
+                    notificationNotice = "Notifications need the bundled app (built with Xcode). Events are still recorded in Activity."
+                } else if await Notifier.requestAuthorization() == false {
+                    notificationNotice = "Notifications are turned off for MacVault in System Settings › Notifications. Events are still recorded in Activity."
+                } else {
+                    notificationNotice = nil
+                }
+            }
+        })
     }
 
     private var accessFooter: String {

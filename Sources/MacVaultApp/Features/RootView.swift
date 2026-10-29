@@ -5,6 +5,7 @@ struct RootView: View {
 
     var body: some View {
         @Bindable var model = model
+        @Bindable var operations = model.operations
         NavigationSplitView {
             List(selection: $model.selection) {
                 Section {
@@ -19,6 +20,15 @@ struct RootView: View {
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
             .safeAreaInset(edge: .bottom) {
+                if model.operations.isExecuting {
+                    HStack(spacing: Spacing.xs) {
+                        ProgressView().controlSize(.small)
+                        Text("Moving to the Trash…").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(Spacing.s)
+                    .accessibilityElement(children: .combine)
+                }
                 if model.isScanning {
                     HStack(spacing: Spacing.xs) {
                         ProgressView().controlSize(.small)
@@ -32,22 +42,17 @@ struct RootView: View {
         } detail: {
             detail(for: model.selection ?? .overview)
         }
+        .sheet(item: $operations.pendingReview) { pending in
+            ApprovalSheet(pending: pending,
+                          onApprove: { Task { await model.operations.approvePending() } },
+                          onCancel: { Task { await model.operations.discardPending() } })
+                .interactiveDismissDisabled()
+        }
     }
 
     private func row(_ item: SidebarItem) -> some View {
-        Label {
-            HStack {
-                Text(item.title)
-                if item.isPlanned {
-                    Spacer()
-                    Text("Planned").font(.caption2).foregroundStyle(.tertiary)
-                }
-            }
-        } icon: {
-            Image(systemName: item.symbol)
-        }
-        .tag(item)
-        .accessibilityLabel(item.isPlanned ? "\(item.title), planned" : item.title)
+        Label(item.title, systemImage: item.symbol)
+            .tag(item)
     }
 
     @ViewBuilder
@@ -57,10 +62,10 @@ struct RootView: View {
         case .analyzer: StorageAnalyzerView()
         case .activity: ActivityView()
         case .settings: SettingsView()
-        case .cleaner: PlannedFeatureView(feature: .cleaner)
-        case .applications: PlannedFeatureView(feature: .applications)
-        case .duplicates: PlannedFeatureView(feature: .duplicates)
-        case .developer: PlannedFeatureView(feature: .developer)
+        case .cleaner: CleanerView()
+        case .applications: ApplicationsView()
+        case .duplicates: DuplicatesView()
+        case .developer: DeveloperToolsView()
         }
     }
 }

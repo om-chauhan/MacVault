@@ -116,8 +116,10 @@ public final class ScanService: Sendable {
     }
 }
 
-/// Startup reconciliation: scans left `running` by a previous process become `interrupted`.
+/// Startup reconciliation: scans left `running` and operations left `executing` by a previous
+/// process become `interrupted`.
 public enum LaunchReconciler {
+    /// Returns the number of interrupted scans plus interrupted operations.
     @discardableResult
     public static func run(store: Store) async throws -> Int {
         let ids = try await store.reconcileInterruptedScans()
@@ -126,6 +128,12 @@ public enum LaunchReconciler {
                 operationId: id, eventType: "scan.reconciled", severity: .warning,
                 message: "A scan was interrupted before it finished and has been marked Interrupted"))
         }
-        return ids.count
+        let operations = try await store.reconcileInterruptedOperations()
+        for id in operations {
+            try await store.appendAudit(AuditEvent(
+                operationId: id, eventType: "operation.reconciled", severity: .warning,
+                message: "A cleanup was interrupted before it finished. Items not recorded as moved were not touched."))
+        }
+        return ids.count + operations.count
     }
 }
