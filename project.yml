@@ -1,0 +1,60 @@
+# XcodeGen spec for a signed .app bundle with two editions.
+#   brew install xcodegen && xcodegen generate && open MacVault.xcodeproj
+# NOT VERIFIED: generated and built only on a Mac; see FEATURE_STATUS.md.
+name: MacVault
+options:
+  bundleIdPrefix: com.macvault
+  deploymentTarget:
+    macOS: "14.0"
+configs:
+  Debug: debug
+  Release: release
+  Debug-AppStore: debug
+  Release-AppStore: release
+packages:
+  MacVaultKit:
+    path: .
+targets:
+  MacVault:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/MacVaultApp
+      - path: Config/PrivacyInfo.xcprivacy
+        buildPhase: resources
+    dependencies:
+      - package: MacVaultKit
+        product: MacVaultCore
+    info:
+      path: Config/Info.plist
+      properties:
+        CFBundleDisplayName: MacVault
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.utilities
+        LSMinimumSystemVersion: "14.0"
+        NSHumanReadableCopyright: ""
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.macvault.app
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        ENABLE_HARDENED_RUNTIME: YES
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_ENTITLEMENTS: Config/MacVault-Direct.entitlements
+      configs:
+        Debug-AppStore:
+          CODE_SIGN_ENTITLEMENTS: Config/MacVault-AppStore.entitlements
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) APPSTORE"
+        Release-AppStore:
+          CODE_SIGN_ENTITLEMENTS: Config/MacVault-AppStore.entitlements
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) APPSTORE"
+schemes:
+  MacVault-Direct:
+    build: { targets: { MacVault: all } }
+    run: { config: Debug }
+    archive: { config: Release }
+  MacVault-AppStore:
+    build: { targets: { MacVault: all } }
+    run: { config: Debug-AppStore }
+    archive: { config: Release-AppStore }
