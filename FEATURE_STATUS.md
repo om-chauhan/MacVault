@@ -2,43 +2,56 @@
 
 Status labels: **Implemented** (real behavior exists *and* is covered by tests that were run), **Partial**, **Planned**, **Blocked**.
 
-Last verified: 2026-10-29, milestone 1. Verification environment: Linux x86_64, Swift 6.0.3, SQLite 3.45.1.
-The SwiftUI app target **has not been compiled** (needs macOS + Xcode). Anything that depends on it is at most **Partial** until it is built and exercised on a Mac.
+Last verified: 2026-10-30, milestone 2 (all planned phases). Verification environment: macOS 27.0.1 (Apple silicon), Xcode 27.1, Swift 6.4.
+
+**What was verified for the app:** both Xcode schemes (`MacVault-Direct`, `MacVault-AppStore`) and `swift build` compile with zero warnings; the bundled Direct build launches, creates its database at schema v3 and stays running. **What was not verified:** the screens have not been exercised interactively or visually (this session had no screen-recording or accessibility permission). Every app-only row below is therefore at most **Partial** until it is clicked through on a Mac. The safety-critical logic behind every screen lives in `MacVaultCore` and is fully tested.
+
+## Core (tested: 115 tests, 1 opt-in perf test skipped, 0 failures)
 
 | Capability | Status | Evidence / notes |
 |---|---|---|
 | Read-only filesystem scanner (bounded traversal, lstat, no symlink following) | **Implemented** | `FilesystemScanner`; 18 scanner tests |
-| Cooperative cancellation with partial results | **Implemented** | Cancelled scans return `.cancelled` and are never marked complete; tested |
-| Inaccessible-item counting and partial-scan state | **Implemented** | Injected EACCES/EPERM/ENOENT tests; real `chmod 000` test passes as a non-root user (skipped as root) |
-| Exclusions (component-aware) | **Implemented** | Tested, incl. prefix-collision case |
-| Mount-point boundary (don't enter other volumes by default) | **Implemented** | Tested via injected device IDs; real external-volume test still to run on a Mac |
-| Hard links counted once | **Implemented** | Tested |
-| Large-file findings (bounded) | **Implemented** | Threshold and cap tested |
-| Per-entry breakdown of the scan root, with “lower bound” flag | **Implemented** | Tested |
-| Throttled, awaited progress (backpressure) | **Implemented** | Monotonic progress test |
-| Volume capacity (system-reported, with source + timestamp) | **Partial** | Linux `statvfs` path tested. macOS `URLResourceValues` path written, **not run** |
-| SQLite store: versioned migrations, FKs, transactions | **Implemented** | v1 = spec schema; v2 adds coverage columns, breakdown, issues. Upgrade + rollback tested |
-| Scan sessions, findings, issues, snapshots persisted | **Implemented** | Integration tests through `ScanService` |
-| Audit log (append-only, searchable, severity filter) | **Implemented** | Core tested; audit write failures surface as warnings |
-| Interrupted-scan reconciliation on launch | **Implemented** | `running` → `interrupted` + audit event; tested |
-| Scan history retention | **Implemented** | Never prunes a running scan; tested |
-| Storage history snapshots (rate-limited, no invented points) | **Implemented** (core) / **Partial** (chart UI) | Chart written, not rendered |
-| Native app shell + sidebar navigation | **Partial** | Written in SwiftUI; not compiled here |
-| Overview dashboard (real data only) | **Partial** | Not compiled here |
-| Storage Analyzer (scan, cancel, progress, largest files table, breakdown, Finder reveal) | **Partial** | Not compiled here |
-| Activity screen (search, severity filter, details) | **Partial** | Not compiled here |
-| Settings (threshold, exclusions, access, retention, delete history) | **Partial** | Not compiled here |
-| Folder access via bookmarks (security-scoped in App Store edition) | **Partial** | Written; needs on-device verification in both editions |
-| Activity export (JSON/CSV, redacted) | **Planned** | Button shown disabled with “Planned” tooltip |
-| Treemap / drill-down navigation | **Planned** | Breakdown list ships instead |
-| Cleaner (rules, manifest, Trash) | **Planned** | Screen shows “Planned”; no deletion code exists |
-| Application inventory / uninstaller | **Planned** | |
-| Duplicate finder | **Planned** | |
-| Developer cleanup | **Planned** | |
-| Menu bar, scheduled read-only scans, notifications | **Planned** | |
-| App Store build / Direct build signing & notarization | **Blocked** | Requires a Mac, Apple Developer account and signing identities |
+| Cooperative cancellation with partial results | **Implemented** | Cancelled scans return `.cancelled`; tested |
+| Inaccessible-item counting and partial-scan state | **Implemented** | Injected EACCES/EPERM/ENOENT; real `chmod 000` test |
+| Exclusions, mount boundaries, hard links counted once | **Implemented** | Tested |
+| Large-file findings; root breakdown with “lower bound” flag | **Implemented** | Tested |
+| Drill-down tree (directories ≤ 4 levels, largest 4,000 kept with all ancestors) | **Implemented** | `ScannerTreeTests`: rollup, depth limit, pruning keeps ancestors, unreadable propagation, persistence. No throughput change: 42.1k vs 41.6k files/s on `/Applications` (297k files), same machine |
+| Treemap layout (squarified) | **Implemented** | `TreemapLayoutTests`: proportional areas, in bounds, no overlap |
+| Volume capacity | **Implemented** | `URLResourceValues` path now runs in tests on macOS |
+| SQLite store: migrations v1→v3, FKs, transactions | **Implemented** | v3 adds tree nodes and operation review detail; v2→v3 upgrade tested |
+| Audit log; interrupted-scan **and interrupted-operation** reconciliation | **Implemented** | Tested |
+| Activity export (JSON/CSV, home-folder redaction, CSV formula neutralisation) | **Implemented** | `ActivityExporterTests` |
+| Safety policy (protected locations, credentials, packages, scopes) | **Implemented** | `SafetyPolicyTests` (19) run against the real default system roots |
+| Operation manifests: draft → approved → executing → outcome; approve once, execute once | **Implemented** | `OperationExecutorTests` |
+| Trash execution with per-item revalidation | **Implemented** | Tested: missing, replaced (inode), symlink swap, parent-folder symlink swap, protected path in a tampered list, in use, Trash error, cancellation, failure to record an outcome |
+| Cleanup rules (caches, logs) | **Implemented** | `CleanupCandidateFinderTests`; rule catalog `2026.10.1` |
+| Developer caches (DerivedData, Simulator, npm, DeviceSupport, Gradle, pub, Archives) | **Implemented** | Every rule target is policy-checked in tests |
+| Project build folders (node_modules, Flutter/Gradle build, .dart_tool, .gradle, Rust target) | **Implemented** | `ProjectArtifactFinderTests`: marker required, symlinks and VCS-containing folders never offered |
+| Application inventory, protected Apple apps and MacVault itself | **Implemented** | `ApplicationInventoryTests` |
+| App leftovers (separate review, confidence-rated, never login items or keychains) | **Implemented** | Tested; removing an app keeps its data |
+| Duplicate finder (size → 64 KiB prefix → full SHA-256; hard links never offered) | **Implemented** | `DuplicateFinderTests`; SHA-256 checked against FIPS vectors |
+| Duplicate removal re-verifies both copies' hashes before moving | **Implemented** | Tested: kept copy changed or missing, item edited in place, hard link |
+| Scheduled scan logic; low-storage warning with hysteresis | **Implemented** | `MonitoringTests` |
 
-## Safety invariants held by this milestone
-- There is **no code path that deletes, moves or writes user files.** `FileSystemProbe` exposes only `stat` and `list`.
-- The only data MacVault deletes is from its own database, and only when you approve it in the Delete Scan History dialog.
+## App (compiled in both editions and launched; not yet exercised interactively)
+
+| Capability | Status | Notes |
+|---|---|---|
+| Overview, Storage Analyzer, Activity, Settings | **Partial** | Compiled and launched |
+| Analyzer drill-down list and treemap with breadcrumbs | **Partial** | Compiled |
+| Activity export menu (save panel) | **Partial** | Compiled |
+| Cleaner, Developer Tools, Applications, Duplicates screens | **Partial** | Compiled. Shared approval sheet; high-risk items need an explicit acknowledgement |
+| In-use checks before moving (running app, Xcode/Simulator for their caches) | **Partial** | Compiled; uses `NSRunningApplication` |
+| Menu bar extra; scheduled read-only scans while open; low-storage notifications | **Partial** | Compiled. Notifications need the bundled app; under `swift run` they are skipped and events still go to Activity |
+| Folder access via bookmarks (security-scoped in App Store edition) | **Partial** | Needs on-device verification in both editions |
+| UI tests (XCUITest) | **Planned** | Not written: needs a Mac session with accessibility permission to run |
+| App Store build / Direct build signing & notarization | **Blocked** | Requires an Apple Developer account and signing identities |
+
+## Safety invariants
+- Exactly one code path changes user files: `OperationExecutor`, through an injected `FileTrasher` that can only move items to the Trash. Nothing is ever deleted outright.
+- Nothing runs without an approved manifest. Approval is a separate, explicit step in the UI (the approval sheet), and a manifest can be approved once and executed once.
+- `SafetyPolicy` is applied when candidates are produced **and again** right before each item moves. Each item is also revalidated (same device:inode, not a symlink, parent folders unchanged, not in use; duplicates re-hashed).
+- Every item outcome is saved before the next item starts. If an outcome cannot be saved, execution stops.
+- The App Store edition keeps its read-only entitlement: it can review but never move items.
+- MacVault deletes data only from its own database (Delete Scan History), only after confirmation.
 - Scans with unreadable items are `partial`, never `completed`.

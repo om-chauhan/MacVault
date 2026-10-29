@@ -62,7 +62,7 @@ final class AppModel {
     private(set) var recentScans: [ScanSessionRecord] = []
     private(set) var scanPhase: ScanPhase = .idle
     private(set) var lastWarnings: [String] = []
-    private(set) var reconciledOnLaunch = 0
+    private(set) var reconciledOnLaunch = LaunchReconciler.Outcome(interruptedScans: 0, interruptedOperations: 0)
     private var scanTask: Task<Void, Never>?
 
     var selectedLocationID: UUID?
@@ -85,8 +85,11 @@ final class AppModel {
     // Monitoring
     private var monitorTask: Task<Void, Never>?
     private(set) var lastScheduledRun: Date?
+    private(set) var scheduledRunActive = false
 
+    /// True while a single scan runs, and for the whole of a scheduled run across several folders.
     var isScanning: Bool {
+        if scheduledRunActive { return true }
         if case .running = scanPhase { return true }
         return false
     }
@@ -104,7 +107,7 @@ final class AppModel {
             let url = try Store.defaultURL()
             let store = try Store(path: url.path)
             self.store = store
-            reconciledOnLaunch = try await LaunchReconciler.run(store: store)
+            reconciledOnLaunch = try await LaunchReconciler.reconcile(store: store)
         } catch {
             startupError = "MacVault could not open its local database. Scan history and the activity log are unavailable. (\(error.localizedDescription))"
             Log.app.error("Store open failed")
@@ -202,6 +205,8 @@ final class AppModel {
     func startScan() {
         guard !isScanning, let location = selectedLocation else { return }
         lastWarnings = []
+        // Enter the running state synchronously so a second request before the task starts is refused.
+        scanPhase = .running(locationID: location.id, progress: ScanProgress())
         scanTask = Task { [weak self] in
             await self?.performScan(location, display: true)
         }
@@ -340,7 +345,10 @@ final class AppModel {
     /// Scans every accessible folder in turn. Read-only; a summary notification is posted when allowed.
     func runScheduledScans() async {
         guard !isScanning, !operations.isExecuting else { return }
+        scheduledRunActive = true
+        defer { scheduledRunActive = false }
         settings.lastScheduledScan = Date()
+        lastWarnings = []
         let locations = access.locations.filter { access.status(of: $0) == .available }
         await audit(AuditEvent(operationId: nil, eventType: "schedule.started", severity: .info,
                                message: "Scheduled scan started for \(locations.count) folder(s)"))

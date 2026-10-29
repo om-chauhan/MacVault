@@ -105,7 +105,8 @@ struct CleanerView: View {
             ReviewFooter(count: scan.selectedCandidates.count, bytes: scan.selectedBytes, buttonTitle: "Review & Move to Trash…",
                          disabled: model.operations.isExecuting || scan.isScanning) {
                 Task {
-                    await model.operations.review(.cleanup, title: "Caches and logs", candidates: scan.selectedCandidates) {
+                    await model.operations.review(.cleanup, title: "Caches and logs", candidates: scan.selectedCandidates,
+                                                  inUseCheck: { RunningApps.cleanupConflict($0) }) {
                         if case .finished(let manifest) = model.operations.phase { scan.removeProcessed(manifest) }
                     }
                 }

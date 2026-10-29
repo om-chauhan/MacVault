@@ -177,4 +177,26 @@ enum RunningApps {
     static func isRunning(bundleId: String) -> Bool {
         !NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty
     }
+
+    /// Tools whose caches must not be moved while they run, keyed by rule.
+    private static let toolsByRule: [String: [(bundleId: String, name: String)]] = [
+        "xcode-derived-data": [("com.apple.dt.Xcode", "Xcode")],
+        "xcode-archives": [("com.apple.dt.Xcode", "Xcode")],
+        "xcode-device-support": [("com.apple.dt.Xcode", "Xcode")],
+        "simulator-caches": [("com.apple.iphonesimulator", "Simulator"), ("com.apple.dt.Xcode", "Xcode")],
+    ]
+
+    /// Skips a cache item while the app or tool that owns it is running. Cache folders in
+    /// ~/Library/Caches are usually named after the owning app's bundle identifier.
+    static func cleanupConflict(_ item: OperationItem) -> String? {
+        if let tools = item.ruleId.flatMap({ toolsByRule[$0] }),
+           let running = tools.first(where: { isRunning(bundleId: $0.bundleId) }) {
+            return "\(running.name) is running. Quit it and try again."
+        }
+        let name = (item.originalPath as NSString).lastPathComponent
+        if name.contains("."), let app = NSRunningApplication.runningApplications(withBundleIdentifier: name).first {
+            return "\(app.localizedName ?? name) is running. Quit it and try again."
+        }
+        return nil
+    }
 }

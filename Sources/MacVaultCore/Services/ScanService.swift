@@ -119,9 +119,24 @@ public final class ScanService: Sendable {
 /// Startup reconciliation: scans left `running` and operations left `executing` by a previous
 /// process become `interrupted`.
 public enum LaunchReconciler {
+    public struct Outcome: Sendable, Equatable {
+        public let interruptedScans: Int
+        public let interruptedOperations: Int
+        public var total: Int { interruptedScans + interruptedOperations }
+
+        public init(interruptedScans: Int, interruptedOperations: Int) {
+            self.interruptedScans = interruptedScans
+            self.interruptedOperations = interruptedOperations
+        }
+    }
+
     /// Returns the number of interrupted scans plus interrupted operations.
     @discardableResult
     public static func run(store: Store) async throws -> Int {
+        try await reconcile(store: store).total
+    }
+
+    public static func reconcile(store: Store) async throws -> Outcome {
         let ids = try await store.reconcileInterruptedScans()
         for id in ids {
             try await store.appendAudit(AuditEvent(
@@ -132,8 +147,8 @@ public enum LaunchReconciler {
         for id in operations {
             try await store.appendAudit(AuditEvent(
                 operationId: id, eventType: "operation.reconciled", severity: .warning,
-                message: "A cleanup was interrupted before it finished. Items not recorded as moved were not touched."))
+                message: "A Trash operation was interrupted before it finished. Check its history for which items were moved."))
         }
-        return ids.count + operations.count
+        return Outcome(interruptedScans: ids.count, interruptedOperations: operations.count)
     }
 }

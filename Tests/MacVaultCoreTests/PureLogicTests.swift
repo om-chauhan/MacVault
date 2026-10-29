@@ -78,6 +78,11 @@ final class ActivityExporterTests: XCTestCase {
         XCTAssertEqual(ActivityExporter.csvField("a,b"), "\"a,b\"")
     }
 
+    func testHomeIsOnlyReplacedAtAPathBoundary() {
+        XCTAssertEqual(ActivityExporter.redactHome("/Users/al/x and /Users/alice/x and /Users/al", home: "/Users/al", userName: "zz"),
+                       "~/x and /Users/alice/x and ~")
+    }
+
     func testUserNameIsOnlyReplacedAsAWholeWord() {
         XCTAssertEqual(ActivityExporter.redactHome("jdoe2 and jdoe.", home: "/Users/jdoe", userName: "jdoe"), "jdoe2 and <user>.")
     }

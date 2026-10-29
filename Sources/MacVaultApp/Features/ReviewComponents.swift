@@ -19,7 +19,7 @@ extension StatusBadge {
         case .completed: self.init(text: status.displayName, symbol: "checkmark.circle", tint: .green)
         case .partial, .interrupted: self.init(text: status.displayName, symbol: "exclamationmark.triangle", tint: .orange)
         case .failed: self.init(text: status.displayName, symbol: "xmark.octagon", tint: .red)
-        case .cancelled, .discarded: self.init(text: status.displayName, symbol: "stop.circle", tint: .secondary)
+        case .cancelled, .discarded, .nothingMoved: self.init(text: status.displayName, symbol: "stop.circle", tint: .secondary)
         case .draft, .approved, .executing: self.init(text: status.displayName, symbol: "clock", tint: .accentColor)
         }
     }

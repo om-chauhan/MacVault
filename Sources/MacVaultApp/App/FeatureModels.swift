@@ -172,15 +172,20 @@ final class ApplicationsModel {
 
     func cancel() { task?.cancel() }
 
+    @ObservationIgnored private var loadToken = UUID()
+
     func loadAssociated(policy: SafetyPolicy) async {
+        let token = UUID()
+        loadToken = token
         associated = []
         leftoverSelection = []
-        guard let app = selectedApp else { return }
+        guard let app = selectedApp else { isLoadingAssociated = false; return }
         isLoadingAssociated = true
-        defer { if selectedApp == app { isLoadingAssociated = false } }
+        // Only the latest request may clear the flag; earlier ones finish silently.
+        defer { if loadToken == token { isLoadingAssociated = false } }
         let inventory = inventory(policy: policy)
         let items = (try? await offMain { inventory.associatedItems(for: app) }) ?? []
-        guard selectedApp == app else { return }
+        guard loadToken == token, selectedApp == app else { return }
         associated = items
         leftoverSelection = Set(items.filter(\.candidate.selectedByDefault).map(\.id))
     }
@@ -230,11 +235,15 @@ final class DuplicatesModel {
 
     func keeper(for group: DuplicateGroup) -> String { keepers[group.contentHash] ?? group.suggestedKeeper.path }
 
+    /// Swaps roles: the previous keeper takes the new keeper's place in the selection, so a copy the
+    /// user chose to keep (unselected) never becomes selected by changing the keeper.
     func setKeeper(_ path: String, for group: DuplicateGroup) {
         let old = keeper(for: group)
+        guard old != path else { return }
+        let newWasSelected = selection.contains(path)
         keepers[group.contentHash] = path
         selection.remove(path)
-        if old != path { selection.insert(old) }
+        if newWasSelected { selection.insert(old) }
     }
 
     func scan(location: AuthorizedLocation, access: AccessCoordinator, policy: SafetyPolicy, exclusions: [String]) {

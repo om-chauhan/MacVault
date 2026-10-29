@@ -122,7 +122,7 @@ extension Store {
             for id in ids {
                 try db.run("""
                 UPDATE operation_manifests SET status = ?, completed_at = ?,
-                    failure_reason = 'The app stopped while this list was being processed. Items not marked as moved were not touched.'
+                    failure_reason = 'The app stopped while this list was being processed. Items still marked pending were not moved, except possibly the one being processed at that moment; check the Trash for it.'
                 WHERE id = ?
                 """, [.text(ManifestStatus.interrupted.rawValue), .date(now), .text(id)])
             }

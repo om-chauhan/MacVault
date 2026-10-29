@@ -57,6 +57,12 @@ final class FakeTrash: @unchecked Sendable {
 }
 
 extension Store {
+    func manifestStatusForTesting(id: String) throws -> ManifestStatus? {
+        try db.query("SELECT status FROM operation_manifests WHERE id = ?", [.text(id)]) {
+            $0.string(0).flatMap(ManifestStatus.init(rawValue:))
+        }.first ?? nil
+    }
+
     /// Creates and approves a manifest for the given candidates.
     func approvedManifest(_ type: OperationType, _ items: (String) -> [OperationItem]) async throws -> String {
         let id = UUID().uuidString

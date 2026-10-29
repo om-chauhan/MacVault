@@ -75,8 +75,11 @@ public enum ActivityExporter {
     static func redactHome(_ text: String, home: String, userName: String) -> String {
         var result = text
         let canonicalHome = PathUtilities.canonicalize(home)
-        for candidate in Set([home, canonicalHome]) where candidate.count > 1 {
-            result = result.replacingOccurrences(of: candidate, with: "~")
+        // Longest first, and only where the home path ends a path component ("/Users/al" must not match "/Users/alice").
+        for candidate in Set([home, canonicalHome]).sorted(by: { $0.count > $1.count }) where candidate.count > 1 {
+            let pattern = NSRegularExpression.escapedPattern(for: candidate) + "(?=/|$|[\\s\"',;:)\\]}])"
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            result = regex.stringByReplacingMatches(in: result, range: NSRange(result.startIndex..., in: result), withTemplate: "~")
         }
         if userName.count >= 2 {
             result = replacingWholeWord(userName, with: "<user>", in: result)

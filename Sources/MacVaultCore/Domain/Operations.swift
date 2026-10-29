@@ -39,6 +39,8 @@ public enum ManifestStatus: String, Sendable, Codable, CaseIterable {
     case partial
     /// No item was moved because of errors.
     case failed
+    /// No item was moved: every item was skipped by revalidation (changed, missing, in use…). Not an error.
+    case nothingMoved
     /// The user stopped execution; remaining items were not touched.
     case cancelled
     /// The draft was discarded without approval.
@@ -61,6 +63,7 @@ public enum ManifestStatus: String, Sendable, Codable, CaseIterable {
         case .completed: return "Completed"
         case .partial: return "Partially completed"
         case .failed: return "Failed"
+        case .nothingMoved: return "Nothing moved"
         case .cancelled: return "Cancelled"
         case .discarded: return "Discarded"
         case .interrupted: return "Interrupted"

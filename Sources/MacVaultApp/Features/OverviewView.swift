@@ -13,10 +13,16 @@ struct OverviewView: View {
                 if let error = model.startupError {
                     InlineBanner(kind: .error, title: "Local database unavailable", message: error)
                 }
-                if model.reconciledOnLaunch > 0 {
+                if model.reconciledOnLaunch.interruptedScans > 0 {
                     InlineBanner(kind: .warning,
-                                 title: "\(model.reconciledOnLaunch) scan(s) were interrupted",
+                                 title: "\(model.reconciledOnLaunch.interruptedScans) scan(s) were interrupted",
                                  message: "MacVault stopped before these scans finished. They are marked Interrupted; their counts reflect the last saved progress only.")
+                }
+                if model.reconciledOnLaunch.interruptedOperations > 0 {
+                    InlineBanner(kind: .warning,
+                                 title: "\(model.reconciledOnLaunch.interruptedOperations) Trash operation(s) were interrupted",
+                                 message: "MacVault stopped while moving items to the Trash. Each list’s history shows which items were moved; the item being processed at that moment may also be in the Trash.",
+                                 actionTitle: "Open Activity") { model.selection = .activity }
                 }
 
                 volumesSection

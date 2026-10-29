@@ -98,6 +98,8 @@ public struct OperationExecutor: Sendable {
             details: ["title": manifest.title, "ruleVersion": manifest.ruleVersion ?? "none"]))
 
         var cancelled = false
+        /// Set when an outcome could not be saved. Execution stops: nothing more is moved without a record.
+        var unrecorded: OperationItem?
         let total = manifest.items.count
         for index in manifest.items.indices where manifest.items[index].status == .pending {
             if Task.isCancelled { cancelled = true; break }
@@ -124,7 +126,12 @@ public struct OperationExecutor: Sendable {
             }
             item.completedAt = Date()
             manifest.items[index] = item
-            try await store.updateOperationItem(item)
+            do {
+                try await store.updateOperationItem(item)
+            } catch {
+                unrecorded = item
+                break
+            }
             try? await store.appendAudit(itemEvent(item))
         }
 
@@ -132,24 +139,38 @@ public struct OperationExecutor: Sendable {
         let failed = manifest.count(.failed)
         let skipped = manifest.count(.skipped)
         let status: ManifestStatus
-        if cancelled {
+        if unrecorded != nil {
+            status = trashed > 0 ? .partial : .failed
+        } else if cancelled {
             status = .cancelled
         } else if trashed == total {
             status = .completed
         } else if trashed == 0 && failed > 0 {
             status = .failed
+        } else if trashed == 0 {
+            status = .nothingMoved
         } else {
             status = .partial
         }
-        let reason: String? = status == .completed ? nil
+        var reason: String? = status == .completed ? nil
             : "\(trashed) moved, \(skipped) skipped, \(failed) failed\(cancelled ? ", \(manifest.count(.pending)) not processed (cancelled)" : "")"
-        try await store.finishExecution(id: manifestId, status: status, failureReason: reason)
+        if let unrecorded {
+            let where_ = unrecorded.status == .trashed ? "It was \(unrecorded.resultingPath.map { "moved to \($0)" } ?? "moved to the Trash")" : "Its outcome was \(unrecorded.status.rawValue)"
+            reason = "MacVault stopped because it could not save the outcome for \(unrecorded.originalPath). \(where_). Remaining items were not touched. \(reason ?? "")"
+        }
+        // Best effort: if the database is failing, the manifest is reconciled as interrupted on next launch.
+        try? await store.finishExecution(id: manifestId, status: status, failureReason: reason)
         manifest.status = status
         manifest.failureReason = reason
         manifest.completedAt = Date()
         await progress(ExecutionProgress(processed: total, total: total, currentPath: ""))
 
-        let severity: AuditSeverity = status == .completed ? .info : (status == .cancelled ? .notice : .warning)
+        let severity: AuditSeverity
+        switch status {
+        case .completed: severity = .info
+        case .cancelled, .nothingMoved: severity = .notice
+        default: severity = unrecorded == nil ? .warning : .error
+        }
         try? await store.appendAudit(AuditEvent(
             operationId: manifestId, eventType: "operation.\(status.rawValue)", severity: severity,
             message: "\(manifest.type.displayName) \(status.displayName.lowercased()): \(trashed) item(s), \(ByteFormat.string(manifest.trashedBytes)) moved to the Trash",

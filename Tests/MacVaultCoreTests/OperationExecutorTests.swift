@@ -112,7 +112,7 @@ final class OperationExecutorTests: XCTestCase {
         let result = try await executor().execute(manifestId: id)
         XCTAssertEqual(result.items.first?.status, .skipped)
         XCTAssertEqual(result.items.first?.message, "No longer exists")
-        XCTAssertEqual(result.status, .partial)
+        XCTAssertEqual(result.status, .nothingMoved, "all skipped is neither partial nor a failure")
         XCTAssertTrue(trash.calls.isEmpty)
     }
 
@@ -227,13 +227,37 @@ final class OperationExecutorTests: XCTestCase {
     func testExecutingManifestIsReconciledAsInterruptedOnLaunch() async throws {
         let id = try await store.approvedManifest(.cleanup) { [self] id in [try! cacheItem("a", manifestId: id)] }
         try await store.beginExecution(id: id)   // simulate a crash mid-execution
-        let reconciled = try await LaunchReconciler.run(store: store)
-        XCTAssertEqual(reconciled, 1)
+        let reconciled = try await LaunchReconciler.reconcile(store: store)
+        XCTAssertEqual(reconciled, .init(interruptedScans: 0, interruptedOperations: 1))
         let saved = try await store.manifest(id: id)
         XCTAssertEqual(saved?.status, .interrupted)
         XCTAssertEqual(saved?.items.first?.status, .pending)
         let events = try await store.auditEvents(minimumSeverity: .warning).map(\.eventType)
         XCTAssertTrue(events.contains("operation.reconciled"))
+    }
+
+    func testFailureToRecordAnOutcomeStopsExecution() async throws {
+        let dbPath = tree.path("ops.sqlite")
+        let fileStore = try Store(path: dbPath)
+        let id = try await fileStore.approvedManifest(.cleanup) { [self] id in
+            (0..<3).map { try! cacheItem("r\($0)", manifestId: id) }
+        }
+        // After the first item is moved, break the items table from another connection.
+        let real = trash.trasher
+        let sabotage = FileTrasher { path in
+            let result = try real.moveToTrash(path)
+            let other = try SQLiteConnection(path: dbPath)
+            try other.execute("PRAGMA foreign_keys = OFF; DROP TABLE operation_items;")
+            return result
+        }
+        let result = try await OperationExecutor(store: fileStore, policy: policy, trasher: sabotage).execute(manifestId: id)
+        XCTAssertEqual(trash.calls.count, 1, "nothing more is moved once outcomes cannot be recorded")
+        XCTAssertTrue(exists(caches + "/r1") && exists(caches + "/r2"))
+        XCTAssertEqual(result.status, .partial)
+        XCTAssertTrue(result.failureReason?.contains("could not save the outcome") ?? false)
+        // The items table is gone, but the manifest row itself must have left `executing`.
+        let status = try await fileStore.manifestStatusForTesting(id: id)
+        XCTAssertEqual(status, .partial)
     }
 
     // MARK: Duplicates
