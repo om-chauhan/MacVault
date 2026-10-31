@@ -18,7 +18,8 @@ struct RootView: View {
                     ForEach([SidebarItem.activity, .settings]) { row($0) }
                 }
             }
-            .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+            // The max also bounds HSplitViews in the detail, which count the sidebar twice (see ApplicationsView).
+            .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 240)
             .safeAreaInset(edge: .bottom) {
                 if model.operations.isExecuting {
                     HStack(spacing: Spacing.xs) {
@@ -40,7 +41,16 @@ struct RootView: View {
                 }
             }
         } detail: {
+            // The split view measures the detail's minimum height at a near-zero width, where wrapping
+            // text (`fixedSize(horizontal: false, vertical: true)`) reports a huge height and the screen
+            // would grow taller than the window. A zero minimum lets the detail take the window's height.
+            // Top alignment: a screen that is still too tall overflows at the bottom, not under the toolbar.
             detail(for: model.selection ?? .overview)
+                .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
+                .canvasBackground()
+                // The canvas continues under the (empty) toolbar instead of a separate bar above it.
+                .toolbarBackground(.hidden, for: .windowToolbar)
+                .modifier(InContentTitle())
         }
         .sheet(item: $operations.pendingReview) { pending in
             ApprovalSheet(pending: pending,
@@ -51,8 +61,12 @@ struct RootView: View {
     }
 
     private func row(_ item: SidebarItem) -> some View {
-        Label(item.title, systemImage: item.symbol)
-            .tag(item)
+        Label {
+            Text(item.title)
+        } icon: {
+            Image(systemName: item.symbol).foregroundStyle(item.tint)
+        }
+        .tag(item)
     }
 
     @ViewBuilder
@@ -66,6 +80,18 @@ struct RootView: View {
         case .applications: ApplicationsView()
         case .duplicates: DuplicatesView()
         case .developer: DeveloperToolsView()
+        }
+    }
+}
+
+/// Each screen shows its title in its `ScreenHeader`, so the toolbar doesn't repeat it (macOS 15+;
+/// the window keeps its title for the Window menu and Mission Control).
+private struct InContentTitle: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.toolbar(removing: .title)
+        } else {
+            content
         }
     }
 }

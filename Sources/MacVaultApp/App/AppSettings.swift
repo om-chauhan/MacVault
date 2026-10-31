@@ -5,7 +5,7 @@ import MacVaultCore
 @MainActor
 @Observable
 final class AppSettings {
-    private let defaults = UserDefaults.standard
+    private let defaults = AppEnvironment.defaults
 
     var largeFileThresholdMB: Int {
         didSet { defaults.set(largeFileThresholdMB, forKey: "largeFileThresholdMB") }

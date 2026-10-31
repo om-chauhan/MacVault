@@ -54,26 +54,51 @@ struct DrillDownBreakdown: View {
         return result.sorted { $0.logicalBytes > $1.logicalBytes }
     }
 
+    /// Colour per entry, shared by the ring, legend, bars and treemap: the five largest get series
+    /// colours, everything else (and the remainder) is neutral.
+    private var colors: [String: Color] {
+        var result: [String: Color] = [:]
+        for (index, entry) in entries.filter({ !$0.isRemainder }).prefix(5).enumerated() {
+            result[entry.id] = Palette.series[index]
+        }
+        return result
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.s) {
-            breadcrumbs
-            if loading {
-                ProgressView().frame(maxWidth: .infinity)
-            } else if entries.isEmpty {
-                ContentUnavailableView("Nothing measured", systemImage: "folder",
-                                       description: Text(current == nil
-                                                         ? "This folder had no readable items when it was scanned."
-                                                         : "No detail was kept below this level."))
-            } else {
-                switch style {
-                case .list: list
-                case .treemap: TreemapView(entries: Array(entries.prefix(150)), onOpen: open)
+        let colors = colors
+        HStack(alignment: .top, spacing: Spacing.m) {
+            CompositionCard(title: current?.name ?? folderName, entries: entries, colors: colors, footer: footer)
+                .frame(width: Dimensions.compositionWidth)
+            VStack(alignment: .leading, spacing: Spacing.s) {
+                breadcrumbs
+                if loading {
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if entries.isEmpty {
+                    EmptyState(title: "Nothing measured", symbol: "folder",
+                               message: current == nil
+                                   ? "This folder had no readable items when it was scanned."
+                                   : "No detail was kept below this level.")
+                } else {
+                    switch style {
+                    case .list: list(colors)
+                    case .treemap:
+                        TreemapView(entries: Array(entries.prefix(150)), colors: colors, onOpen: open)
+                            .clipShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
+                            .padding(Spacing.xs)
+                            .cardSurface()
+                    }
                 }
             }
-            Text(footer).font(.caption).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
+        .frame(maxHeight: .infinity, alignment: .top)
         .task(id: "\(scan.id)|\(current?.path ?? "")") { await load() }
         .onChange(of: scan.id) { _, _ in trail = [] }
+    }
+
+    private var folderName: String {
+        let name = (scan.scopeDescription as NSString).lastPathComponent
+        return name.isEmpty ? scan.scopeDescription : name
     }
 
     private var footer: String {
@@ -94,33 +119,37 @@ struct DrillDownBreakdown: View {
 
     private var breadcrumbs: some View {
         HStack(spacing: Spacing.xxs) {
-            Button(scan.scopeDescription) { trail = [] }
+            Button(folderName) { trail = [] }
                 .buttonStyle(.link)
                 .disabled(trail.isEmpty)
+                .help(scan.scopeDescription)
             ForEach(Array(trail.enumerated()), id: \.element.id) { index, crumb in
                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary).accessibilityHidden(true)
                 Button(crumb.name) { trail = Array(trail.prefix(index + 1)) }
+                    .accessibilityIdentifier("crumb-\(crumb.name)")
                     .buttonStyle(.link)
                     .disabled(index == trail.count - 1)
             }
             Spacer()
             if let current {
-                Text(ByteFormat.string(current.logicalBytes)).monospacedDigit().foregroundStyle(.secondary)
+                Text(ByteFormat.string(current.logicalBytes)).font(.rowValue).monospacedDigit().foregroundStyle(.secondary)
                 Button { trail.removeLast() } label: { Label("Up", systemImage: "arrow.up") }
                     .controlSize(.small)
                     .keyboardShortcut(.upArrow, modifiers: [.command])
+                    .help("Up one level (⌘↑)")
             }
         }
-        .font(.callout)
+        .font(.callout.weight(.medium))
+        .frame(minHeight: Spacing.l)
         .lineLimit(1)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Location in scan")
     }
 
-    private var list: some View {
+    private func list(_ colors: [String: Color]) -> some View {
         let maxBytes = max(entries.map(\.logicalBytes).max() ?? 1, 1)
         return List(entries) { entry in
-            DrillRow(entry: entry, fraction: Double(entry.logicalBytes) / Double(maxBytes))
+            DrillRow(entry: entry, fraction: Double(entry.logicalBytes) / Double(maxBytes), color: colors[entry.id] ?? Palette.neutral)
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { open(entry) }
                 .contextMenu {
@@ -131,42 +160,95 @@ struct DrillDownBreakdown: View {
                     }
                 }
                 .accessibilityAction(named: "Open") { open(entry) }
+                .accessibilityIdentifier("breakdownRow-\(entry.name)")
         }
-        .listStyle(.inset(alternatesRowBackgrounds: true))
+        .listStyle(.inset)
+        .listInCard()
+    }
+}
+
+/// Ring of the current level's largest entries plus "Other", with legend rows (ref. 03).
+private struct CompositionCard: View {
+    let title: String
+    let entries: [BreakdownEntry]
+    let colors: [String: Color]
+    let footer: String
+
+    var body: some View {
+        let total = max(entries.reduce(0) { $0 + $1.logicalBytes }, 1)
+        let named = entries.filter { colors[$0.id] != nil }
+        let other = total - named.reduce(0) { $0 + $1.logicalBytes }
+        let segments = named.map { ChartSegment(id: $0.id, label: $0.name, bytes: $0.logicalBytes, color: colors[$0.id]!) }
+            + (other > 0 ? [ChartSegment(id: "other", label: "Other", bytes: other, color: Palette.neutral)] : [])
+        Card("Composition", symbol: "chart.pie.fill", tint: Palette.analyzer, info: footer) {
+            if entries.isEmpty {
+                CardEmptyState(title: "Nothing measured", message: "No sizes were recorded at this level.")
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Spacing.s) {
+                        RingChart(segments: segments) {
+                            VStack(spacing: 0) {
+                                ValueText(value: ByteFormat.string(total), size: .metric)
+                                Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                                    .frame(maxWidth: 80)
+                            }
+                        }
+                        .frame(width: Dimensions.compositionRing, height: Dimensions.compositionRing)
+                        .frame(maxWidth: .infinity)
+                        VStack(spacing: Spacing.xs) {
+                            ForEach(segments) { segment in
+                                LegendRow(color: segment.color, label: segment.label, value: ByteFormat.string(segment.bytes),
+                                          share: Double(segment.bytes) / Double(total))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .environment(\.cardFillsHeight, true)
     }
 }
 
 private struct DrillRow: View {
     let entry: BreakdownEntry
     let fraction: Double
+    let color: Color
 
     var body: some View {
-        HStack(spacing: Spacing.s) {
-            Image(systemName: entry.isRemainder ? "square.stack" : (entry.isDirectory ? "folder.fill" : "doc"))
-                .foregroundStyle(entry.isDirectory && !entry.isRemainder ? Color.accentColor : .secondary)
-                .frame(width: 18).accessibilityHidden(true)
-            Text(entry.name).lineLimit(1).truncationMode(.middle).frame(minWidth: 140, maxWidth: 260, alignment: .leading)
-                .foregroundStyle(entry.isRemainder ? .secondary : .primary)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.secondary.opacity(0.12))
-                    Capsule().fill(Color.accentColor.opacity(entry.isRemainder ? 0.35 : 0.75))
-                        .frame(width: max(2, geo.size.width * fraction))
+        HStack(spacing: Spacing.xs) {
+            Image(systemName: entry.isRemainder ? "square.stack.fill" : (entry.isDirectory ? "folder.fill" : "doc.fill"))
+                .foregroundStyle(entry.isDirectory && !entry.isRemainder ? color : .secondary)
+                .frame(width: Spacing.m).accessibilityHidden(true)
+            // Name column (with the lower-bound badge) of the same width on every row, so bars line up.
+            HStack(spacing: Spacing.xs) {
+                Text(entry.name).lineLimit(1).truncationMode(.middle)
+                    .foregroundStyle(entry.isRemainder ? .secondary : .primary)
+                    .help(entry.isRemainder ? entry.name : entry.path)
+                if !entry.isComplete {
+                    StatusBadge(text: "Lower bound", symbol: "eye.slash.fill", tint: Palette.warning)
+                        .help("\(entry.inaccessibleItems) item(s) inside could not be read")
                 }
             }
-            .frame(height: 6)
-            .accessibilityHidden(true)
-            Text(ByteFormat.string(entry.logicalBytes)).monospacedDigit().frame(width: 90, alignment: .trailing)
-            Text(entry.fileCount.map { "\($0.formatted()) files" } ?? "")
-                .font(.caption).foregroundStyle(.secondary).frame(width: 90, alignment: .trailing)
-            if !entry.isComplete {
-                StatusBadge(text: "Lower bound", symbol: "eye.slash", tint: .orange)
-                    .help("\(entry.inaccessibleItems) item(s) inside could not be read")
+            .frame(minWidth: 96, maxWidth: 280, alignment: .leading)
+            .layoutPriority(1)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Palette.track)
+                    Capsule().fill(color.gradient)
+                        .frame(width: max(Spacing.xxs, geo.size.width * fraction))
+                }
             }
+            .frame(minWidth: Spacing.l, maxHeight: Spacing.xs)
+            .accessibilityHidden(true)
+            Text(ByteFormat.string(entry.logicalBytes)).font(.rowValue).monospacedDigit()
+                .frame(minWidth: 72, alignment: .trailing)
+            Text(entry.fileCount.map { counted($0, "file") } ?? "")
+                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                .frame(minWidth: 64, alignment: .trailing)
             Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary).opacity(entry.canDrill ? 1 : 0)
                 .accessibilityHidden(true)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, Spacing.xxs / 2)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(entry.name), \(ByteFormat.string(entry.logicalBytes))\(entry.isComplete ? "" : ", lower bound")\(entry.canDrill ? ", folder" : "")")
     }
@@ -175,6 +257,7 @@ private struct DrillRow: View {
 /// Squarified treemap of the current level. Click a folder to open it.
 struct TreemapView: View {
     let entries: [BreakdownEntry]
+    let colors: [String: Color]
     let onOpen: (BreakdownEntry) -> Void
     @State private var hovered: String?
 
@@ -191,31 +274,32 @@ struct TreemapView: View {
                 }
             }
         }
-        .frame(minHeight: 320)
+        .frame(minHeight: 200)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Treemap of folder sizes")
     }
 
     private func tile(_ entry: BreakdownEntry, rect: LayoutRect, index: Int) -> some View {
-        let color: Color = entry.isRemainder ? .secondary.opacity(0.25)
-            : (entry.isDirectory ? Color.accentColor.opacity(max(0.25, 0.85 - Double(index) * 0.04)) : .secondary.opacity(0.4))
+        let base = colors[entry.id] ?? (entry.isDirectory && !entry.isRemainder ? Palette.analyzer.opacity(max(0.35, 0.8 - Double(index) * 0.04)) : Palette.neutral)
         return Button { onOpen(entry) } label: {
             ZStack(alignment: .topLeading) {
-                Rectangle().fill(color)
-                Rectangle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1)
+                RoundedRectangle(cornerRadius: Radius.small, style: .continuous).fill(base.gradient)
                 if rect.width > 70 && rect.height > 34 {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(entry.name).font(.caption.weight(.semibold)).lineLimit(1)
-                        Text(ByteFormat.string(entry.logicalBytes)).font(.caption2).monospacedDigit()
+                    // Large tiles get larger labels, like the hero numbers of cards.
+                    let large = rect.width > 160 && rect.height > 90
+                    VStack(alignment: .leading, spacing: Spacing.xxs / 2) {
+                        Text(entry.name).font(large ? .cardTitle : .caption.weight(.semibold)).lineLimit(1)
+                        Text(ByteFormat.string(entry.logicalBytes)).font(large ? .rowValue : .caption2.weight(.medium)).monospacedDigit()
                     }
                     .foregroundStyle(.white)
-                    .shadow(radius: 1)
-                    .padding(4)
+                    .shadow(color: .black.opacity(0.35), radius: 1)
+                    .padding(Spacing.xs)
                 }
                 if hovered == entry.id {
-                    Rectangle().strokeBorder(Color.primary, lineWidth: 2)
+                    RoundedRectangle(cornerRadius: Radius.small, style: .continuous).strokeBorder(Color.primary, lineWidth: 2)
                 }
             }
+            .padding(1)
         }
         .buttonStyle(.plain)
         .frame(width: max(0, rect.width), height: max(0, rect.height))
@@ -230,5 +314,6 @@ struct TreemapView: View {
         }
         .accessibilityLabel("\(entry.name), \(ByteFormat.string(entry.logicalBytes))")
         .accessibilityHint(entry.canDrill ? "Opens this folder" : "")
+        .accessibilityIdentifier("treemapTile-\(entry.name)")
     }
 }

@@ -32,7 +32,7 @@ Documentation/                decisions (ADRs), capability matrix
 ## Run on a Mac (Xcode 15.3+ / Swift 5.10+, macOS 14+)
 ```bash
 swift test                       # core test suite
-swift run MacVault               # launches the app (unbundled, Direct-edition behavior)
+swift run MacVaultApp            # launches the app (unbundled, Direct-edition behavior)
 ```
 For a proper bundled, signed app with both editions:
 ```bash

@@ -54,10 +54,7 @@ final class OperationsModel {
         return false
     }
 
-    var policy: SafetyPolicy {
-        let own = (try? Store.defaultURL())?.deletingLastPathComponent().path
-        return SafetyPolicy(ownDataDirectory: own)
-    }
+    var policy: SafetyPolicy { AppEnvironment.safetyPolicy }
 
     // MARK: Review
 
@@ -114,7 +111,8 @@ final class OperationsModel {
         await audit(AuditEvent(operationId: id, eventType: "operation.approved", severity: .notice,
                                message: "Approved: move \(pending.manifest.items.count) item(s) to the Trash"))
 
-        let executor = OperationExecutor(store: store, policy: policy, inUseCheck: pending.inUseCheck)
+        let executor = OperationExecutor(store: store, policy: policy, trasher: AppEnvironment.trasher,
+                                         inUseCheck: pending.inUseCheck)
         phase = .executing(ExecutionProgress(processed: 0, total: pending.manifest.items.count, currentPath: ""))
         let report: @Sendable (ExecutionProgress) async -> Void = { [weak self] progress in
             await self?.setProgress(progress)

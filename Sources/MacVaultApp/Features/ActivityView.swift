@@ -16,20 +16,22 @@ struct ActivityView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: Spacing.s) {
-                TextField("Search messages, event types or operation IDs", text: $search)
+            ScreenHeader(item: .activity, subtitle: subtitle) {
+                TextField("Search activity", text: $search)
                     .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 360)
+                    .frame(width: Dimensions.searchFieldWidth)
                     .onSubmit { reload() }
+                    .help("Search messages, event types and operation IDs. Press Return to search the whole log.")
                 Picker("Severity", selection: $minimumSeverity) {
                     Text("All severities").tag(AuditSeverity?.none)
                     Text("Notice and above").tag(AuditSeverity?.some(.notice))
                     Text("Warnings and errors").tag(AuditSeverity?.some(.warning))
                     Text("Errors only").tag(AuditSeverity?.some(.error))
                 }
+                .labelsHidden()
                 .fixedSize()
-                Spacer()
-                Menu("Export") {
+                .help("Show events of at least this severity")
+                Menu {
                     Section("Home folder replaced with ~") {
                         Button("JSON…") { export(.json, .homeFolder) }
                         Button("CSV…") { export(.csv, .homeFolder) }
@@ -38,49 +40,62 @@ struct ActivityView: View {
                         Button("JSON with Full Paths…") { export(.json, .none) }
                         Button("CSV with Full Paths…") { export(.csv, .none) }
                     }
+                } label: {
+                    Label("Export", systemImage: "square.and.arrow.up")
                 }
                 .fixedSize()
                 .disabled(model.store == nil)
-                .help("Exports the whole activity log. Redacted exports replace your home folder and account name.")
+                .help(model.store == nil ? "The activity log is unavailable." : "Exports the whole activity log. Redacted exports replace your home folder and account name.")
             }
-            .padding(.horizontal, Spacing.l)
-            .padding(.vertical, Spacing.s)
-            Divider()
             if let exportError {
                 InlineBanner(kind: .error, title: "Export failed", message: exportError, actionTitle: "Dismiss") { self.exportError = nil }
-                    .padding(Spacing.s)
+                    .padding(.horizontal, Spacing.l)
+                    .padding(.bottom, Spacing.s)
             }
+            Divider()
 
             if model.store == nil {
-                ContentUnavailableView("Activity log unavailable", systemImage: "exclamationmark.triangle",
-                                       description: Text(model.startupError ?? "The local database could not be opened."))
+                EmptyState(title: "Activity log unavailable", symbol: "exclamationmark.triangle",
+                           message: model.startupError ?? "The local database could not be opened.")
             } else if events.isEmpty {
-                ContentUnavailableView(search.isEmpty && minimumSeverity == nil ? "No activity yet" : "No matching activity",
-                                       systemImage: "list.bullet.rectangle",
-                                       description: Text("Scans, access changes and data management actions are recorded here."))
+                EmptyState(title: search.isEmpty && minimumSeverity == nil ? "No activity yet" : "No matching activity",
+                           symbol: SidebarItem.activity.symbol,
+                           message: search.isEmpty && minimumSeverity == nil
+                               ? "Scans, access changes and data management actions are recorded here."
+                               : "Try another search or a lower severity.")
             } else {
+                // Edge to edge: inside the split view's detail an HSplitView counts the sidebar twice
+                // (see ApplicationsView), so it has no horizontal page inset.
                 HSplitView {
                     Table(events, selection: $selection, sortOrder: $sortOrder) {
                         TableColumn("Time", value: \.createdAt) { e in
-                            Text(e.createdAt.formatted(date: .abbreviated, time: .standard)).monospacedDigit()
+                            // Compact; the full date is in the help and the detail pane.
+                            Text(e.createdAt.formatted(.dateTime.year(.twoDigits).month(.twoDigits).day(.twoDigits)
+                                .hour().minute().second()))
+                                .monospacedDigit().lineLimit(1)
+                                .help(e.createdAt.formatted(date: .complete, time: .standard))
                         }
-                        .width(min: 150, ideal: 170)
+                        .width(min: 150, ideal: 160, max: 200)
                         TableColumn("Severity", value: \.severity.rawValue) { e in
                             HStack(spacing: Spacing.xxs) { SeverityIcon(severity: e.severity); Text(e.severity.rawValue.capitalized) }
                         }
-                        .width(min: 90, ideal: 100)
-                        TableColumn("Event", value: \.eventType) { e in
-                            Text(e.eventType).font(.callout.monospaced()).foregroundStyle(.secondary)
-                        }
-                        .width(min: 120, ideal: 140)
+                        .width(min: 80, ideal: 92, max: 110)
                         TableColumn("Message", value: \.message) { e in
-                            Text(e.message).lineLimit(1)
+                            Text(e.message).lineLimit(1).truncationMode(.middle).help(e.message)
                         }
+                        .width(min: 120, ideal: 420)
+                        TableColumn("Event", value: \.eventType) { e in
+                            Text(e.eventType).font(.smallPath).foregroundStyle(.secondary).lineLimit(1).help(e.eventType)
+                        }
+                        .width(min: 110, ideal: 160, max: 220)
                     }
-                    .frame(minWidth: 520)
+                    .alternatingRowBackgrounds(.disabled)
+                    // On the canvas, like the detail pane beside it.
+                    .scrollContentBackground(.hidden)
+                    .frame(minWidth: 240, idealWidth: 720, maxWidth: .infinity)
 
                     EventDetail(event: selected)
-                        .frame(minWidth: 260, idealWidth: 300, maxWidth: 380)
+                        .frame(minWidth: 150, idealWidth: 300, maxWidth: 320)
                 }
             }
         }
@@ -88,6 +103,18 @@ struct ActivityView: View {
         .onChange(of: minimumSeverity) { _, _ in reload() }
         .onChange(of: search) { _, newValue in if newValue.isEmpty { reload() } }
         .task { reload() }
+    }
+
+    /// What the table shows: the log is append-only; counts are of the events listed.
+    private var subtitle: String {
+        let events = model.recentEvents
+        guard !events.isEmpty else { return "Append-only log of scans, access changes, reviews and moves" }
+        let warnings = events.filter { $0.severity == .warning }.count
+        let errors = events.filter { $0.severity == .error }.count
+        var parts = [counted(events.count, "event")]
+        if warnings > 0 { parts.append("\(warnings) warning\(warnings == 1 ? "" : "s")") }
+        if errors > 0 { parts.append("\(errors) error\(errors == 1 ? "" : "s")") }
+        return parts.joined(separator: " · ")
     }
 
     private func export(_ format: ActivityExporter.Format, _ redaction: ActivityExporter.Redaction) {
@@ -113,25 +140,50 @@ struct EventDetail: View {
     var body: some View {
         if let event {
             ScrollView {
-                VStack(alignment: .leading, spacing: Spacing.s) {
-                    HStack { SeverityIcon(severity: event.severity); Text(event.eventType).font(.headline.monospaced()) }
-                    Text(event.message).textSelection(.enabled)
-                    Divider()
-                    LabeledContent("Time", value: event.createdAt.formatted(date: .complete, time: .standard))
-                    if let op = event.operationId {
-                        LabeledContent("Operation ID") { Text(op).font(.caption.monospaced()).textSelection(.enabled) }
+                VStack(alignment: .leading, spacing: Spacing.m) {
+                    HStack(spacing: Spacing.xs) {
+                        SeverityIcon(severity: event.severity)
+                        TagPill(text: event.severity.rawValue, tint: tint(event.severity))
+                        Spacer(minLength: 0)
+                    }
+                    Text(event.eventType).font(.headline.monospaced()).textSelection(.enabled)
+                    Text(event.message).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        detailRow("Time", event.createdAt.formatted(date: .complete, time: .standard))
+                        if let op = event.operationId { detailRow("Operation ID", op, monospaced: true) }
                     }
                     if let details = prettyDetails(event.detailsJSON) {
-                        Text("Details").font(.subheadline.weight(.medium))
-                        Text(details).font(.caption.monospaced()).textSelection(.enabled)
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            Text("Details").font(.cardTitle)
+                            Text(details).font(.smallPath).textSelection(.enabled)
+                                .padding(Spacing.s)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Palette.track, in: RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
+                        }
                     }
                 }
                 .padding(Spacing.m)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         } else {
-            ContentUnavailableView("No selection", systemImage: "sidebar.right",
-                                   description: Text("Select an event to see its details."))
+            EmptyState(title: "No selection", symbol: "sidebar.right", message: "Select an event to see its details.")
+        }
+    }
+
+    private func detailRow(_ label: String, _ value: String, monospaced: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs / 2) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(monospaced ? .smallPath : .callout).textSelection(.enabled)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func tint(_ severity: AuditSeverity) -> Color {
+        switch severity {
+        case .info: return .secondary
+        case .notice: return Palette.storage
+        case .warning: return Palette.warning
+        case .error: return Palette.error
         }
     }
 

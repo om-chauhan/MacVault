@@ -52,10 +52,26 @@ targets:
         Release-AppStore:
           CODE_SIGN_ENTITLEMENTS: Config/MacVault-AppStore.entitlements
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) APPSTORE"
+  MacVaultUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - Tests/MacVaultUITests
+    dependencies:
+      - target: MacVault
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.macvault.uitests
+        TEST_TARGET_NAME: MacVault
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   MacVault-Direct:
     build: { targets: { MacVault: all } }
     run: { config: Debug }
+    test:
+      config: Debug
+      targets: [MacVaultUITests]
     archive: { config: Release }
   MacVault-AppStore:
     build: { targets: { MacVault: all } }

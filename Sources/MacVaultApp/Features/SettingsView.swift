@@ -10,11 +10,25 @@ struct SettingsView: View {
 
     var body: some View {
         @Bindable var settings = model.settings
-        Form {
+        VStack(spacing: 0) {
+            ScreenHeader(item: .settings, subtitle: "Scanning, folder access, monitoring and MacVault’s own data") {}
+            form(settings)
+        }
+        .navigationTitle("Settings")
+        .confirmationDialog("Delete scan history?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Delete Scan History", role: .destructive) { Task { await model.deleteScanHistory() } }
+        } message: {
+            Text("All scan sessions, findings and storage history will be removed from MacVault’s database. This cannot be undone. No files on your disk are changed.")
+        }
+    }
+
+    private func form(_ settings: AppSettings) -> some View {
+        @Bindable var settings = settings
+        return Form {
             Section("Scanning") {
-                Stepper(value: $settings.largeFileThresholdMB, in: 1...100_000, step: settings.largeFileThresholdMB < 100 ? 10 : 100) {
-                    LabeledContent("List files of at least", value: ByteFormat.string(settings.largeFileThresholdBytes))
-                }
+                StepperRow(title: "List files of at least", valueText: ByteFormat.string(settings.largeFileThresholdBytes),
+                           value: $settings.largeFileThresholdMB, range: 1...100_000,
+                           step: settings.largeFileThresholdMB < 100 ? 10 : 100)
                 Toggle("Enter other volumes found inside a scanned folder", isOn: $settings.crossMountPoints)
                 Text("Off by default: mounted disks and network shares inside a folder are counted as skipped instead of measured.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -26,8 +40,8 @@ struct SettingsView: View {
                 }
                 ForEach(settings.exclusions, id: \.self) { path in
                     HStack {
-                        Image(systemName: "nosign").foregroundStyle(.secondary)
-                        Text(PathUtilities.abbreviatingHome(path)).lineLimit(1).truncationMode(.middle)
+                        Image(systemName: "nosign").foregroundStyle(.secondary).accessibilityHidden(true)
+                        PathText(path: path)
                         Spacer()
                         Button("Remove") { settings.exclusions.removeAll { $0 == path } }.controlSize(.small)
                     }
@@ -46,9 +60,9 @@ struct SettingsView: View {
                 ForEach(model.access.locations) { location in
                     let status = model.access.status(of: location)
                     HStack {
-                        Image(systemName: "folder").foregroundStyle(.secondary)
-                        VStack(alignment: .leading) {
-                            Text(location.displayPath).lineLimit(1).truncationMode(.middle)
+                        Image(systemName: "folder.fill").foregroundStyle(Palette.analyzer).accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: Spacing.xxs / 2) {
+                            Text(location.displayPath).lineLimit(1).truncationMode(.middle).help(location.path)
                             Text("\(status.label) · added \(location.addedAt.formatted(date: .abbreviated, time: .omitted))")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
@@ -59,6 +73,7 @@ struct SettingsView: View {
                         Button("Remove") { Task { await model.removeLocation(location) } }
                             .controlSize(.small)
                             .disabled(model.isScanning)
+                            .help(model.isScanning ? "Wait for the scan to finish." : "Stop scanning this folder. Its files are not touched.")
                     }
                 }
                 Button("Add Folder…") { Task { await model.chooseAndAddLocation() } }
@@ -76,9 +91,8 @@ struct SettingsView: View {
             }
 
             Section {
-                Stepper(value: $settings.keepScans, in: 1...500) {
-                    LabeledContent("Keep the newest", value: "\(settings.keepScans) scans")
-                }
+                StepperRow(title: "Keep the newest", valueText: counted(settings.keepScans, "scan"),
+                           value: $settings.keepScans, range: 1...500)
                 HStack {
                     Button("Apply Now") {
                         Task {
@@ -98,12 +112,13 @@ struct SettingsView: View {
             Section("Local Data") {
                 if let path = model.store?.path {
                     LabeledContent("Database") {
-                        Text(PathUtilities.abbreviatingHome(path)).font(.caption.monospaced()).textSelection(.enabled)
+                        PathText(path: path, small: true)
                     }
                     Button("Reveal Database in Finder") { FinderActions.reveal([path]) }
                 }
                 Button("Delete Scan History…", role: .destructive) { confirmDelete = true }
                     .disabled(model.isScanning || model.store == nil)
+                    .help(model.store == nil ? "The local database is unavailable." : (model.isScanning ? "Wait for the scan to finish." : "Delete MacVault’s scan records. Your files are not touched."))
                 Text("Deletes MacVault’s own records of scans, findings and storage snapshots. Your files are not touched. The activity log is kept.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -117,21 +132,24 @@ struct SettingsView: View {
                 Picker("Scheduled read-only scans", selection: $settings.scanSchedule) {
                     ForEach(ScanSchedule.allCases, id: \.self) { Text($0.displayName).tag($0) }
                 }
+                .accessibilityIdentifier("schedulePicker")
                 if settings.scanSchedule != .off {
                     LabeledContent("Last scheduled scan", value: settings.lastScheduledScan?.shortDateTime ?? "Not yet")
                     Toggle("Notify when a scheduled scan finishes", isOn: notificationBinding($settings.notifyScheduledScans))
                     Button("Run Scheduled Scan Now") { Task { await model.runScheduledScans() } }
                         .disabled(model.isScanning || model.access.locations.isEmpty)
+                        .help(model.access.locations.isEmpty ? "Add a folder first." : (model.isScanning ? "A scan is already running." : "Scan every folder now. Read-only."))
                 }
                 Toggle("Warn when a disk is low on space", isOn: notificationBinding($settings.lowStorageAlerts))
+                    .accessibilityIdentifier("lowStorageToggle")
                 if settings.lowStorageAlerts {
-                    Stepper(value: $settings.lowStorageThresholdPercent, in: 1...50) {
-                        LabeledContent("Warn below", value: "\(settings.lowStorageThresholdPercent)% available")
-                    }
+                    StepperRow(title: "Warn below", valueText: "\(settings.lowStorageThresholdPercent)% available",
+                               value: $settings.lowStorageThresholdPercent, range: 1...50)
                 }
                 Toggle("Show MacVault in the menu bar", isOn: $settings.showMenuBarExtra)
+                    .accessibilityIdentifier("menuBarToggle")
                 if let notice = notificationNotice {
-                    Text(notice).font(.caption).foregroundStyle(.orange)
+                    Label(notice, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(Palette.warning)
                 }
             } header: {
                 Text("Monitoring")
@@ -148,12 +166,10 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("Settings")
-        .confirmationDialog("Delete scan history?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Delete Scan History", role: .destructive) { Task { await model.deleteScanHistory() } }
-        } message: {
-            Text("All scan sessions, findings and storage history will be removed from MacVault’s database. This cannot be undone. No files on your disk are changed.")
-        }
+        .scrollContentBackground(.hidden)
+        .frame(maxWidth: Dimensions.formWidth)
+        // Leading, under the screen header like every other screen's content.
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Turning on an option that notifies asks macOS for permission first; the option stays on either way

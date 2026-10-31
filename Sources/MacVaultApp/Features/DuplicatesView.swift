@@ -12,21 +12,23 @@ struct DuplicatesView: View {
     var body: some View {
         @Bindable var dups = model.duplicates
         VStack(spacing: 0) {
-            controls(dups)
-            Divider()
+            ScreenHeader(item: .duplicates, subtitle: subtitle(dups)) { controls(dups) }
+
             VStack(alignment: .leading, spacing: Spacing.s) {
                 OperationStatusPanel(types: [.duplicateRemoval])
                 if let error = dups.error { InlineBanner(kind: .error, title: "Search could not finish", message: error) }
-                if let result = dups.result {
-                    summary(result)
+                if let result = dups.result, !result.isComplete {
+                    InlineBanner(kind: .warning, title: "\(result.inaccessibleItems) item(s) could not be read",
+                                 message: "Some duplicates may be missing from this list.")
                 }
                 OperationHistoryList(types: [.duplicateRemoval])
+                if let result = dups.result, !dups.groups.isEmpty { summary(result, dups) }
+                content(dups)
             }
             .padding(.horizontal, Spacing.l)
-            .padding(.vertical, Spacing.xs)
+            .padding(.bottom, Spacing.m)
+            .frame(maxHeight: .infinity, alignment: .top)
 
-            content(dups)
-            Divider()
             ReviewFooter(count: dups.selectedCount, bytes: dups.selectedBytes, buttonTitle: "Review & Move Copies to Trash…",
                          disabled: model.operations.isExecuting || dups.isScanning) {
                 let estimated = dups.selectedBytes
@@ -41,47 +43,52 @@ struct DuplicatesView: View {
         .navigationTitle("Duplicates")
     }
 
+    private func subtitle(_ dups: DuplicatesModel) -> String {
+        guard let location else { return "Files with identical content" }
+        return "Identical files in \(location.displayPath)"
+    }
+
+    @ViewBuilder
     private func controls(_ dups: DuplicatesModel) -> some View {
-        HStack(spacing: Spacing.s) {
-            Menu {
-                ForEach(model.access.locations) { loc in
-                    Button(loc.displayPath) { dups.locationID = loc.id }
-                }
-                if !model.access.locations.isEmpty { Divider() }
-                Button("Choose Folder…") {
-                    Task {
-                        await model.chooseAndAddLocation()
-                        dups.locationID = model.selectedLocationID
-                    }
-                }
-            } label: {
-                Label(location?.displayPath ?? "Choose a folder", systemImage: "folder")
+        Menu {
+            ForEach(model.access.locations) { loc in
+                Button(loc.displayPath) { dups.locationID = loc.id }
             }
-            .frame(maxWidth: 260)
-            .disabled(dups.isScanning)
-
-            Picker("Minimum size", selection: Binding(get: { dups.minimumSizeMB }, set: { dups.minimumSizeMB = $0 })) {
-                ForEach([1, 10, 50, 100, 500], id: \.self) { Text("≥ \($0) MB").tag($0) }
-            }
-            .fixedSize()
-            .disabled(dups.isScanning)
-
-            Spacer()
-            if dups.isScanning {
-                ProgressView().controlSize(.small)
-                Text(progressText(dups.progress)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                Button("Stop") { dups.cancel() }
-            } else {
-                Button(dups.result == nil ? "Find Duplicates" : "Search Again") {
-                    if let location { dups.scan(location: location, access: model.access, policy: model.operations.policy,
-                                                exclusions: model.settings.exclusions) }
+            if !model.access.locations.isEmpty { Divider() }
+            Button("Choose Folder…") {
+                Task {
+                    await model.chooseAndAddLocation()
+                    dups.locationID = model.selectedLocationID
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(location == nil || model.operations.isExecuting)
             }
+        } label: {
+            Label((location?.displayName ?? "Choose a folder").middleTruncated(24), systemImage: "folder")
         }
-        .padding(.horizontal, Spacing.l)
-        .padding(.vertical, Spacing.s)
+        .fixedSize()
+        .disabled(dups.isScanning)
+        .help(location.map { "Folder to search: \($0.path)" } ?? "Choose a folder to search")
+
+        Picker("Minimum size", selection: Binding(get: { dups.minimumSizeMB }, set: { dups.minimumSizeMB = $0 })) {
+            ForEach([1, 10, 50, 100, 500], id: \.self) { Text("≥ \($0) MB").tag($0) }
+        }
+        .labelsHidden()
+        .fixedSize()
+        .disabled(dups.isScanning)
+        .help("Only files at least this large are compared")
+
+        if dups.isScanning {
+            ProgressView().controlSize(.small)
+            Text(progressText(dups.progress)).font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+            Button("Stop") { dups.cancel() }
+                .help("Stop searching. Nothing has been changed.")
+        } else {
+            Button(dups.result == nil ? "Find Duplicates" : "Search Again") {
+                if let location { dups.scan(location: location, access: model.access, policy: model.operations.policy,
+                                            exclusions: model.settings.exclusions) }
+            }
+            .disabled(location == nil || model.operations.isExecuting)
+            .help(location == nil ? "Choose a folder first." : "Compare files by size, then by content. Read-only.")
+        }
     }
 
     private func progressText(_ progress: DuplicateProgress?) -> String {
@@ -93,30 +100,56 @@ struct DuplicatesView: View {
         }
     }
 
-    private func summary(_ result: DuplicateScanResult) -> some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            HStack(spacing: Spacing.xl) {
-                Metric(label: "Groups", value: result.groups.count.formatted())
-                Metric(label: "Up to", value: ByteFormat.string(result.reclaimableBytes), caption: "if one copy of each is kept")
-                Metric(label: "Files compared", value: result.filesConsidered.formatted())
-            }
-            Text("Every group was verified with a full SHA-256 content hash. Savings are estimates: APFS clones can share storage, and space is freed only after the Trash is emptied. Hard-linked files (\(result.hardLinksIgnored)) are never offered.")
-                .font(.caption).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
-            if !result.isComplete {
-                InlineBanner(kind: .warning, title: "\(result.inaccessibleItems) item(s) could not be read",
-                             message: "Some duplicates may be missing from this list.")
+    private func summary(_ result: DuplicateScanResult, _ dups: DuplicatesModel) -> some View {
+        let groups = result.groups.sorted { $0.reclaimableBytes > $1.reclaimableBytes }
+        return Card("Found", symbol: "doc.on.doc.fill", tint: Palette.duplicates,
+                    info: "Every group was verified with a full SHA-256 content hash. Savings are estimates: APFS clones can share storage, and space is freed only after the Trash is emptied. Hard-linked files (\(result.hardLinksIgnored)) are never offered.") {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: Spacing.l) {
+                    totals(result, dups).frame(width: Dimensions.summaryTotalsWidth, alignment: .leading)
+                    CategoryBars(segments: groups.prefix(4).enumerated().map { index, group in
+                        ChartSegment(id: group.contentHash, label: group.files.first?.name ?? "Group \(index + 1)",
+                                     bytes: group.reclaimableBytes,
+                                     color: index == 0 ? Palette.duplicates : Palette.series[(index + 1) % Palette.series.count])
+                    }, maxRows: 4)
+                    .frame(maxWidth: .infinity)
+                }
+                totals(result, dups)
             }
         }
     }
 
+    private func totals(_ result: DuplicateScanResult, _ dups: DuplicatesModel) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.xxs) {
+                Text("Up to").font(.callout).foregroundStyle(.secondary)
+                ValueText(value: ByteFormat.string(result.reclaimableBytes), size: .tile)
+            }
+            Text("\(counted(result.groups.count, "group")) · \(counted(result.filesConsidered, "file")) compared")
+                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            Text(dups.selectedCount == 0 ? "Nothing selected" : "\(dups.selectedCount) selected · \(ByteFormat.string(dups.selectedBytes))")
+                .font(.caption.weight(.medium)).monospacedDigit()
+        }
+        .accessibilityElement(children: .combine)
+    }
+
     @ViewBuilder
     private func content(_ dups: DuplicatesModel) -> some View {
-        if dups.groups.isEmpty {
-            ContentUnavailableView {
-                Label(dups.isScanning ? "Searching…" : (dups.result == nil ? "Find files with identical content" : "No duplicates found"),
-                      systemImage: "doc.on.doc")
-            } description: {
-                Text("Files are compared by size, then by content hash. Nothing is removed automatically — you choose which copy to keep. App libraries, packages, Git data and your Library folder are never searched.")
+        if dups.groups.isEmpty && dups.isScanning {
+            LoadingState(title: progressText(dups.progress),
+                         message: "Files are compared by size, then by content hash. Nothing is changed.")
+        } else if dups.groups.isEmpty {
+            EmptyState(title: dups.result == nil ? "Find files with identical content" : "No duplicates found",
+                       symbol: "doc.on.doc",
+                       message: "Files are compared by size, then by content hash. Nothing is removed automatically — you choose which copy to keep. App libraries, packages, Git data and your Library folder are never searched.") {
+                if let location {
+                    Button(dups.result == nil ? "Find Duplicates" : "Search Again") {
+                        dups.scan(location: location, access: model.access, policy: model.operations.policy,
+                                  exclusions: model.settings.exclusions)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.operations.isExecuting)
+                }
             }
         } else {
             List {
@@ -130,15 +163,17 @@ struct DuplicatesView: View {
                                              onKeep: { dups.setKeeper(file.path, for: group) })
                         }
                     } header: {
-                        HStack {
+                        HStack(spacing: Spacing.xs) {
                             Text("\(group.files.count) copies · \(ByteFormat.string(group.sizeBytes)) each")
+                                .font(.cardTitle).foregroundStyle(.primary).monospacedDigit()
                             Spacer()
-                            Text("Up to \(ByteFormat.string(group.reclaimableBytes))").monospacedDigit()
+                            TagPill(text: "Up to \(ByteFormat.string(group.reclaimableBytes))", tint: Palette.duplicates)
                         }
                     }
                 }
             }
             .listStyle(.inset)
+            .listInCard()
         }
     }
 }
@@ -149,32 +184,40 @@ private struct DuplicateFileRow: View {
     @Binding var isSelected: Bool
     let onKeep: () -> Void
 
+    private var displayPath: String { PathUtilities.abbreviatingHome(file.path) }
+
     var body: some View {
         HStack(spacing: Spacing.s) {
             Toggle("", isOn: $isSelected)
                 .toggleStyle(.checkbox).labelsHidden()
                 .disabled(isKeeper || !OperationsModel.canModifyFiles)
-                .accessibilityLabel("Move \(file.name) to the Trash")
-            VStack(alignment: .leading, spacing: 2) {
-                Text(file.name).font(.callout.weight(isKeeper ? .semibold : .regular)).lineLimit(1)
-                Text(PathUtilities.abbreviatingHome(file.path)).font(.caption.monospaced()).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.middle)
+                .accessibilityLabel(isKeeper ? "Kept copy \(displayPath)" : "Move \(displayPath) to the Trash")
+                // A hint: SwiftUI keeps a checkbox's accessibility value as its checked state.
+                .accessibilityHint(isKeeper ? "Kept copy" : (isSelected ? "Will be moved to the Trash" : "Kept"))
+                .accessibilityIdentifier("dup-\(file.path)")
+            VStack(alignment: .leading, spacing: Spacing.xxs / 2) {
+                Text(file.name).font(isKeeper ? .rowTitle.weight(.semibold) : .rowTitle).lineLimit(1)
+                Text(displayPath).font(.smallPath).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle).help(file.path)
             }
             Spacer()
             if let modified = file.modifiedAt {
-                Text(modified.formatted(date: .abbreviated, time: .omitted)).font(.caption).foregroundStyle(.secondary)
+                Text(modified.formatted(date: .abbreviated, time: .omitted)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
             }
             if isKeeper {
-                StatusBadge(text: "Keep", symbol: "star.fill", tint: .green)
+                StatusBadge(text: "Keep", symbol: "star.fill", tint: Palette.success)
             } else {
                 Button("Keep This") { onKeep() }.controlSize(.small)
+                    // Every row has this button, so its label names the file it keeps.
+                    .accessibilityLabel("Keep \(displayPath)")
+                    .accessibilityIdentifier("keep-\(file.path)")
             }
         }
         .contextMenu {
             Button("Reveal in Finder") { FinderActions.reveal([file.path]) }
             Button("Copy Path") { FinderActions.copy([file.path]) }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(isKeeper ? "kept copy" : (isSelected ? "will be moved to the Trash" : "kept"))
+        // Children stay separate so the checkbox and "Keep This" remain their own controls.
+        .accessibilityElement(children: .contain)
     }
 }

@@ -26,10 +26,11 @@ var targets: [Target] = [
 ]
 
 #if os(macOS)
-products.append(.executable(name: "MacVault", targets: ["MacVault"]))
+// Named MacVaultApp so it does not clash with the Xcode app target "MacVault" (UI test host resolution).
+products.append(.executable(name: "MacVaultApp", targets: ["MacVaultApp"]))
 targets.append(
     .executableTarget(
-        name: "MacVault",
+        name: "MacVaultApp",
         dependencies: ["MacVaultCore"],
         path: "Sources/MacVaultApp"
     )

@@ -104,7 +104,7 @@ final class AppModel {
         guard !started else { return }
         started = true
         do {
-            let url = try Store.defaultURL()
+            let url = try AppEnvironment.storeURL()
             let store = try Store(path: url.path)
             self.store = store
             reconciledOnLaunch = try await LaunchReconciler.reconcile(store: store)
@@ -113,6 +113,7 @@ final class AppModel {
             Log.app.error("Store open failed")
         }
         operations.attach(store: { [weak self] in self?.store }, audit: { [weak self] event in await self?.audit(event) })
+        for path in AppEnvironment.initialLocations { access.add(URL(fileURLWithPath: path)) }
         selectedLocationID = access.locations.first?.id
         await refreshVolumes()
         await reloadScans()
@@ -243,6 +244,10 @@ final class AppModel {
         }
 
         do {
+            if AppEnvironment.uiTestScanDelay > 0 {
+                // UI tests only (see AppEnvironment): hold the running state so it can be captured.
+                try? await Task.sleep(for: .seconds(AppEnvironment.uiTestScanDelay))
+            }
             let outcome = try await service.runScan(configuration: config, scopeDescription: location.displayPath,
                                                     onProgress: onProgress)
             _ = try? await store.pruneScans(keepLatest: settings.keepScans)

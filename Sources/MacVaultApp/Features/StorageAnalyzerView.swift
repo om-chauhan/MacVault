@@ -19,10 +19,7 @@ struct StorageAnalyzerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            controlBar
-                .padding(.horizontal, Spacing.l)
-                .padding(.vertical, Spacing.s)
-            Divider()
+            ScreenHeader(item: .analyzer, subtitle: "Read-only scans of folders you choose") { controls }
             content
         }
         .navigationTitle("Storage Analyzer")
@@ -31,55 +28,53 @@ struct StorageAnalyzerView: View {
 
     // MARK: Controls
 
-    private var controlBar: some View {
-        HStack(spacing: Spacing.s) {
+    @ViewBuilder
+    private var controls: some View {
+        Menu {
+            ForEach(model.access.locations) { location in
+                Button(location.displayPath) { Task { await model.selectLocation(location.id) } }
+            }
+            if !model.access.locations.isEmpty { Divider() }
+            Button("Choose Folder…") { Task { await model.chooseAndAddLocation() } }
+        } label: {
+            Label((model.selectedLocation?.displayName ?? "Choose a folder").middleTruncated(28), systemImage: "folder")
+        }
+        .fixedSize()
+        .disabled(model.isScanning)
+        .help(model.selectedLocation.map { "Folder to scan: \($0.path)" } ?? "Choose a folder to scan")
+
+        let pastScans = model.scans(for: model.selectedLocation)
+        if pastScans.count > 1 {
             Menu {
-                ForEach(model.access.locations) { location in
-                    Button(location.displayPath) { Task { await model.selectLocation(location.id) } }
-                }
-                if !model.access.locations.isEmpty { Divider() }
-                Button("Choose Folder…") { Task { await model.chooseAndAddLocation() } }
-            } label: {
-                Label(model.selectedLocation?.displayPath ?? "Choose a folder", systemImage: "folder")
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .frame(maxWidth: 360)
-            .disabled(model.isScanning)
-            .help("Folder to scan")
-
-            let pastScans = model.scans(for: model.selectedLocation)
-            if pastScans.count > 1 {
-                Menu {
-                    ForEach(pastScans) { scan in
-                        Button("\(scan.startedAt.shortDateTime) — \(scan.status.displayName)") {
-                            Task { await model.show(scanID: scan.id) }
-                        }
+                ForEach(pastScans) { scan in
+                    Button("\(scan.startedAt.shortDateTime) — \(scan.status.displayName)") {
+                        Task { await model.show(scanID: scan.id) }
                     }
-                } label: {
-                    Label("History", systemImage: "clock.arrow.circlepath")
                 }
-                .fixedSize()
-                .disabled(model.isScanning)
+            } label: {
+                Label("History", systemImage: "clock.arrow.circlepath")
             }
+            .fixedSize()
+            .disabled(model.isScanning)
+            .help("Show an earlier scan of this folder")
+        }
 
-            Spacer()
-
-            if model.isScanning {
-                Button(role: .cancel) { model.cancelScan() } label: {
-                    Label("Cancel Scan", systemImage: "stop.fill")
-                }
-                .keyboardShortcut(.cancelAction)
-            } else {
-                Button {
-                    model.startScan()
-                } label: {
-                    Label(model.displayedScan == nil ? "Scan" : "Scan Again", systemImage: "play.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.selectedLocation == nil || model.store == nil)
-                .help("Read-only scan. Nothing is moved or deleted.")
+        if model.isScanning {
+            Button(role: .cancel) { model.cancelScan() } label: {
+                Label("Cancel Scan", systemImage: "stop.fill")
             }
+            .keyboardShortcut(.cancelAction)
+            .help("Stop the scan (⌘.). What was read so far is kept and marked Cancelled.")
+        } else {
+            Button {
+                model.startScan()
+            } label: {
+                Label(model.displayedScan == nil ? "Scan" : "Scan Again", systemImage: "play.fill")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(model.selectedLocation == nil || model.store == nil)
+            .accessibilityIdentifier("scanButton")
+            .help(model.selectedLocation == nil ? "Choose a folder first." : "Read-only scan. Nothing is moved or deleted.")
         }
     }
 
@@ -88,16 +83,13 @@ struct StorageAnalyzerView: View {
     @ViewBuilder
     private var content: some View {
         if model.access.locations.isEmpty {
-            ContentUnavailableView {
-                Label("Choose a folder to analyze", systemImage: "folder.badge.plus")
-            } description: {
-                Text("MacVault scans only folders you choose and never changes them. Choose your home folder for the broadest view.")
-            } actions: {
+            EmptyState(title: "Choose a folder to analyze", symbol: "folder.badge.plus",
+                       message: "MacVault scans only folders you choose and never changes them. Choose your home folder for the broadest view.") {
                 Button("Choose Folder…") { Task { await model.chooseAndAddLocation() } }
                     .buttonStyle(.borderedProminent)
             }
         } else {
-            VStack(alignment: .leading, spacing: Spacing.m) {
+            VStack(alignment: .leading, spacing: Spacing.s) {
                 if case .failed(let message) = model.scanPhase {
                     InlineBanner(kind: .error, title: "Scan could not run", message: message,
                                  actionTitle: "Dismiss") { model.dismissScanError() }
@@ -110,28 +102,41 @@ struct StorageAnalyzerView: View {
                 }
                 if let scan = model.displayedScan {
                     ScanSummaryHeader(scan: scan, issues: model.displayedIssues, showIssues: $showIssues)
-                    Picker("View", selection: $mode) {
-                        ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
+                    HStack(spacing: Spacing.s) {
+                        Picker("View", selection: $mode) {
+                            ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .fixedSize()
+                        Spacer(minLength: Spacing.s)
+                        if mode == .largest && !model.displayedFindings.isEmpty {
+                            TextField("Filter by name or folder", text: $search)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: Dimensions.searchFieldWidth)
+                        }
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(maxWidth: 400)
 
                     switch mode {
                     case .largest: LargestFilesTable(findings: model.displayedFindings, search: $search,
                                                      thresholdBytes: model.settings.largeFileThresholdBytes)
-                    case .breakdown: DrillDownBreakdown(scan: scan, aggregates: model.displayedAggregates, style: .list)
-                    case .treemap: DrillDownBreakdown(scan: scan, aggregates: model.displayedAggregates, style: .treemap)
+                    // One view for both styles, so the drill-down position survives switching between them.
+                    case .breakdown, .treemap:
+                        DrillDownBreakdown(scan: scan, aggregates: model.displayedAggregates,
+                                           style: mode == .treemap ? .treemap : .list)
                     }
-                } else if !model.isScanning {
-                    ContentUnavailableView {
-                        Label("Not scanned yet", systemImage: "chart.bar.doc.horizontal")
-                    } description: {
-                        Text("Run a scan to measure what is inside \(model.selectedLocation?.displayPath ?? "this folder").")
-                    }
+                } else if model.isScanning {
+                    LoadingState(title: "Measuring \(model.selectedLocation?.displayName ?? "the folder")…",
+                                 message: "The breakdown, treemap and largest files appear when the scan finishes. Nothing is changed.")
+                } else {
+                    // The Scan button is in the header, where it is on every visit.
+                    EmptyState(title: "Not scanned yet", symbol: SidebarItem.analyzer.symbol,
+                               message: "Scan “\(model.selectedLocation?.displayName ?? "this folder")” to see what uses space inside it. Scans only read; nothing is changed.")
+                        .help(model.selectedLocation?.path ?? "")
                 }
             }
-            .padding(Spacing.l)
+            .padding(.horizontal, Spacing.l)
+            .padding(.bottom, Spacing.m)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
@@ -143,25 +148,32 @@ struct ScanProgressPanel: View {
     let progress: ScanProgress
 
     var body: some View {
-        Card {
-            HStack(alignment: .center, spacing: Spacing.m) {
-                // Total work is unknown during traversal, so progress is indeterminate.
-                ProgressView().controlSize(.regular)
-                VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    Text("Scanning…").font(.headline)
-                    Text(PathUtilities.abbreviatingHome(progress.currentDirectory))
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                }
-                Spacer()
-                Metric(label: "Files", value: progress.filesVisited.formatted())
-                Metric(label: "Folders", value: progress.directoriesVisited.formatted())
-                Metric(label: "Observed", value: bytes(progress.logicalBytes))
-                Metric(label: "Not readable", value: progress.inaccessibleItems.formatted())
-                Metric(label: "Elapsed", value: Duration.seconds(progress.elapsedSeconds).formatted(.time(pattern: .minuteSecond)))
+        Card("Scanning…", symbol: "magnifyingglass", tint: Palette.analyzer,
+             trailing: AnyView(Text(Duration.seconds(progress.elapsedSeconds).formatted(.time(pattern: .minuteSecond)))
+                .font(.rowValue).monospacedDigit().foregroundStyle(.secondary))) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: Spacing.xl) { metrics }
+                VStack(alignment: .leading, spacing: Spacing.s) { metrics }
+            }
+            // Total work is unknown during traversal, so progress is indeterminate.
+            ProgressView().progressViewStyle(.linear).tint(Palette.analyzer)
+            if !progress.currentDirectory.isEmpty {
+                PathText(path: progress.currentDirectory, small: true)
             }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Scan in progress, \(progress.filesVisited) files read")
+    }
+
+    @ViewBuilder
+    private var metrics: some View {
+        Metric(label: "Observed so far", value: bytes(progress.logicalBytes), size: .hero)
+        HStack(alignment: .top, spacing: Spacing.l) {
+            Metric(label: "Files", value: progress.filesVisited.formatted(), size: .tile)
+            Metric(label: "Folders", value: progress.directoriesVisited.formatted(), size: .tile)
+            Metric(label: "Not readable", value: progress.inaccessibleItems.formatted(), size: .tile)
+        }
+        Spacer(minLength: 0)
     }
 }
 
@@ -172,29 +184,48 @@ struct ScanSummaryHeader: View {
     let issues: [ScanIssue]
     @Binding var showIssues: Bool
 
+    private var folderName: String {
+        let name = (scan.scopeDescription as NSString).lastPathComponent
+        return name.isEmpty ? scan.scopeDescription : name
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
-                Text(scan.scopeDescription).font(.title2.weight(.semibold)).lineLimit(1).truncationMode(.middle)
-                StatusBadge(status: scan.status)
-                Spacer()
-                Text("Scanned \(scan.startedAt.shortDateTime)").font(.caption).foregroundStyle(.secondary)
+            Card(folderName, symbol: "folder.fill", tint: Palette.analyzer,
+                 info: "\(scan.scopeDescription)\n\nA scan reads folders one after another, so it is a series of observations over time rather than an instant snapshot. Scope size is not the same as volume usage.",
+                 trailing: AnyView(HStack(spacing: Spacing.xs) {
+                     Text("Scanned \(scan.startedAt.shortDateTime)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                     StatusBadge(status: scan.status)
+                 })) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: Spacing.xl) {
+                        hero
+                        details
+                        Spacer(minLength: 0)
+                    }
+                    VStack(alignment: .leading, spacing: Spacing.s) {
+                        hero
+                        details
+                    }
+                }
+                let notes = coverageNotes
+                if !notes.isEmpty {
+                    Text(notes.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                }
             }
-            HStack(spacing: Spacing.xl) {
-                Metric(label: "Observed size", value: bytes(scan.bytesObserved), caption: "Logical sum of files in scope")
-                Metric(label: "Allocated", value: bytes(scan.allocatedBytesObserved), caption: "May exceed physical use (APFS clones)")
-                Metric(label: "Files", value: scan.filesVisited.formatted())
-                Metric(label: "Folders", value: scan.directoriesVisited.formatted())
-            }
-
             statusBanner
+        }
+    }
 
-            let notes = coverageNotes
-            if !notes.isEmpty {
-                Text(notes.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
-            }
-            Text("A scan reads folders one after another, so it is a series of observations over time rather than an instant snapshot. Scope size is not the same as volume usage.")
-                .font(.caption).foregroundStyle(.tertiary)
+    private var hero: some View {
+        Metric(label: "Observed size", value: bytes(scan.bytesObserved), caption: "Logical sum of files", size: .hero)
+    }
+
+    private var details: some View {
+        HStack(alignment: .top, spacing: Spacing.l) {
+            Metric(label: "Allocated", value: bytes(scan.allocatedBytesObserved), caption: "May exceed use (APFS clones)", size: .tile)
+            Metric(label: "Files", value: scan.filesVisited.formatted(),  size: .tile)
+            Metric(label: "Folders", value: scan.directoriesVisited.formatted(),  size: .tile)
         }
     }
 
@@ -238,20 +269,20 @@ struct IssueList: View {
     let total: Int
 
     var body: some View {
-        Card {
+        Card("Not Readable", symbol: "eye.slash.fill", tint: Palette.warning) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.xxs) {
                     ForEach(Array(issues.enumerated()), id: \.offset) { _, issue in
-                        HStack {
-                            Text(PathUtilities.abbreviatingHome(issue.path)).lineLimit(1).truncationMode(.middle)
-                            Spacer()
-                            Text(issue.errorDescription ?? description(issue.kind)).foregroundStyle(.secondary)
+                        HStack(spacing: Spacing.xs) {
+                            PathText(path: issue.path, small: true)
+                            Spacer(minLength: Spacing.xs)
+                            Text(issue.errorDescription ?? description(issue.kind)).font(.caption).foregroundStyle(.secondary)
                         }
-                        .font(.caption.monospaced())
                     }
                 }
             }
-            .frame(maxHeight: 160)
+            .frame(maxHeight: Dimensions.boundedListHeight)
+            .fixedSize(horizontal: false, vertical: true)
             if total > issues.count {
                 Text("Showing \(issues.count) of \(total). All are counted in the totals above.").font(.caption).foregroundStyle(.secondary)
             }
@@ -309,25 +340,21 @@ struct LargestFilesTable: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            HStack {
-                Text("Files of \(ByteFormat.string(thresholdBytes)) or more · \(findings.count) found")
-                    .font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                TextField("Filter by name or folder", text: $search)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 260)
-            }
+            Text("Files of \(ByteFormat.string(thresholdBytes)) or more · \(findings.count) found · review only, not assessed for removal")
+                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
             if findings.isEmpty {
-                ContentUnavailableView("No files at or above \(ByteFormat.string(thresholdBytes))",
-                                       systemImage: "doc",
-                                       description: Text("Lower the threshold in Settings to list smaller files on the next scan."))
+                EmptyState(title: "No files at or above \(ByteFormat.string(thresholdBytes))", symbol: "doc",
+                           message: "Lower the threshold in Settings to list smaller files on the next scan.")
+            } else if rows.isEmpty {
+                EmptyState(title: "No matching files", symbol: "magnifyingglass",
+                           message: "No file name or folder contains “\(search)”.")
             } else {
                 Table(rows, selection: $selection, sortOrder: $sortOrder) {
                     TableColumn("Name", value: \.name) { row in
-                        Label(row.name, systemImage: "doc").lineLimit(1)
+                        Label(row.name, systemImage: "doc.fill").lineLimit(1).help(row.path)
                     }
                     TableColumn("Size", value: \.size) { row in
-                        Text(row.size < 0 ? "Unknown" : ByteFormat.string(row.size)).monospacedDigit()
+                        Text(row.size < 0 ? "Unknown" : ByteFormat.string(row.size)).font(.rowValue).monospacedDigit()
                     }
                     .width(min: 80, ideal: 90)
                     TableColumn("Allocated", value: \.allocated) { row in
@@ -339,9 +366,11 @@ struct LargestFilesTable: View {
                     }
                     .width(min: 90, ideal: 110)
                     TableColumn("Folder", value: \.location) { row in
-                        Text(row.location).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                        Text(row.location).font(.smallPath).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                            .help(row.location)
                     }
                 }
+                .listInCard()
                 .contextMenu(forSelectionType: FileRow.ID.self) { ids in
                     let picked = rows.filter { ids.contains($0.id) }
                     Button("Reveal in Finder") { FinderActions.reveal(picked.map(\.path)) }
@@ -352,8 +381,6 @@ struct LargestFilesTable: View {
                 } primaryAction: { ids in
                     FinderActions.reveal(rows.filter { ids.contains($0.id) }.map(\.path))
                 }
-                Text("Findings are for review only. MacVault has not assessed whether any file is safe to remove.")
-                    .font(.caption).foregroundStyle(.tertiary)
             }
         }
         .sheet(item: $inspected) { row in
@@ -385,7 +412,7 @@ struct FileDetailSheet: View {
             }
         }
         .padding(Spacing.l)
-        .frame(width: 520)
+        .frame(width: Dimensions.sheetWidth - Spacing.xl * 4)
     }
 }
 

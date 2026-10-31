@@ -12,6 +12,7 @@ struct MacVaultApp: App {
             RootView()
                 .environment(model)
                 .frame(minWidth: 960, minHeight: 620)
+                .uiTestWindowSize()
                 .task { await model.start() }
         }
         .windowToolbarStyle(.unified)
@@ -42,12 +43,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Needed when launched via `swift run` (no app bundle) so the window can take focus.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        AppEnvironment.applyUITestHooks()
     }
 
     /// With the menu bar item shown, MacVault keeps running after its window closes so scheduled
     /// read-only scans and storage checks continue.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        !(UserDefaults.standard.object(forKey: "showMenuBarExtra") as? Bool ?? true)
+        !(AppEnvironment.defaults.object(forKey: "showMenuBarExtra") as? Bool ?? true)
     }
 }
 
@@ -59,42 +61,63 @@ struct MenuBarContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
             if let volume = model.volumes.first {
-                VStack(alignment: .leading, spacing: Spacing.xxs) {
-                    HStack {
-                        Text(volume.displayName).font(.headline)
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "internaldrive.fill").foregroundStyle(Palette.storage).accessibilityHidden(true)
+                        Text(volume.displayName).font(.cardTitle)
                         Spacer()
-                        Text("\(bytes(volume.availableBytes)) available").font(.callout).monospacedDigit()
+                        if let fraction = volume.usedFraction {
+                            Text("\(LegendRow.percent(fraction)) used").font(.caption.weight(.semibold)).monospacedDigit()
+                        }
+                    }
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.xxs) {
+                        ValueText(value: bytes(volume.availableBytes), size: .tile)
+                        Text("available").font(.callout).foregroundStyle(.secondary)
                     }
                     if let fraction = volume.usedFraction {
-                        ProgressView(value: fraction)
-                            .tint(fraction >= 0.9 ? .orange : .accentColor)
-                            .accessibilityLabel("\(Int(fraction * 100)) percent used")
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(Palette.track)
+                                Capsule().fill((fraction >= 0.9 ? Palette.warning : Palette.storage).gradient)
+                                    .frame(width: geo.size.width * fraction)
+                            }
+                        }
+                        .frame(height: Spacing.xs)
+                        .accessibilityLabel("\(Int(fraction * 100)) percent used")
                     }
                     Text("of \(bytes(volume.totalBytes)) · observed \(volume.observedAt.relative)")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             } else {
-                Text("Reading volume information…").foregroundStyle(.secondary)
+                HStack(spacing: Spacing.xs) {
+                    ProgressView().controlSize(.small)
+                    Text("Reading volume information…").foregroundStyle(.secondary)
+                }
             }
 
             Divider()
 
             if case .running(_, let progress) = model.scanPhase {
-                HStack {
+                HStack(spacing: Spacing.xs) {
                     ProgressView().controlSize(.small)
-                    Text("Scanning… \(progress.filesVisited.formatted()) files").font(.callout).monospacedDigit()
+                    Text("Scanning… \(counted(progress.filesVisited, "file"))").font(.callout).monospacedDigit()
                     Spacer()
                     Button("Cancel") { model.cancelScan() }.controlSize(.small)
+                        .help("Stop the scan. What was read so far is kept.")
                 }
             } else if let last = model.recentScans.first {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: Spacing.xxs) {
                     HStack {
-                        Text("Last scan").font(.caption).foregroundStyle(.secondary)
+                        TagPill(text: "Last scan", tint: Palette.analyzer)
                         Spacer()
                         StatusBadge(status: last.status)
                     }
-                    Text("\(last.scopeDescription) · \(bytes(last.bytesObserved))").font(.callout).lineLimit(1).truncationMode(.middle)
-                    Text(last.startedAt.relative).font(.caption).foregroundStyle(.secondary)
+                    HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
+                        ValueText(value: bytes(last.bytesObserved), size: .metric)
+                        Text(last.startedAt.relative).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text(last.scopeDescription).font(.smallPath).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle).help(last.scopeDescription)
                 }
             } else {
                 Text("No scans yet").font(.callout).foregroundStyle(.secondary)
@@ -110,6 +133,7 @@ struct MenuBarContent: View {
             HStack {
                 Button("Scan \(model.selectedLocation?.displayName ?? "Folder")") { model.startScan() }
                     .disabled(model.isScanning || model.selectedLocation == nil || model.store == nil)
+                    .help(model.selectedLocation == nil ? "Choose a folder in MacVault first." : "Read-only scan of this folder.")
                 Spacer()
                 Button("Open MacVault") {
                     openWindow(id: "main")
@@ -125,6 +149,6 @@ struct MenuBarContent: View {
             .controlSize(.small)
         }
         .padding(Spacing.m)
-        .frame(width: 320)
+        .frame(width: Dimensions.menuBarWidth)
     }
 }

@@ -6,30 +6,19 @@ struct RuleFindingsList: View {
     @Bindable var scan: RuleScanModel
 
     var body: some View {
+        let found = scan.findings.filter { !$0.candidates.isEmpty }
+        let checked = scan.findings.filter { $0.candidates.isEmpty }
         List {
-            ForEach(scan.findings) { findings in
+            // Rules that found something first; the rest are listed compactly below.
+            ForEach(found) { findings in
                 Section {
-                    if findings.candidates.isEmpty {
-                        Text(emptyText(findings)).font(.callout).foregroundStyle(.secondary)
-                    }
                     ForEach(findings.candidates) { candidate in
                         CandidateRow(candidate: candidate, isSelected: binding(for: candidate.id), showsCategory: false,
-                                     disabled: !OperationsModel.canModifyFiles)
+                                     showsConsequence: false, disabled: !OperationsModel.canModifyFiles)
                     }
-                } header: {
-                    HStack(spacing: Spacing.xs) {
-                        Text(findings.rule.title)
-                        StatusBadge(risk: findings.rule.risk)
-                        Spacer()
-                        if !findings.candidates.isEmpty {
-                            Text(ByteFormat.string(findings.totalBytes)).monospacedDigit()
-                            Button(allSelected(findings) ? "Deselect All" : "Select All") { toggleAll(findings) }
-                                .controlSize(.small)
-                                .disabled(!OperationsModel.canModifyFiles)
-                        }
-                    }
-                } footer: {
-                    VStack(alignment: .leading, spacing: 2) {
+                    // What the rule covers and what happens after removal, once per rule. A row rather than
+                    // a section footer, so it wraps in narrow windows.
+                    VStack(alignment: .leading, spacing: Spacing.xxs / 2) {
                         Text(findings.rule.explanation)
                         Text("After removal: \(findings.rule.consequence)")
                         if findings.protectedCount > 0 || findings.tooRecentCount > 0 {
@@ -37,10 +26,51 @@ struct RuleFindingsList: View {
                         }
                     }
                     .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .listRowSeparator(.hidden)
+                    .accessibilityElement(children: .combine)
+                } header: {
+                    HStack(spacing: Spacing.xs) {
+                        Text(findings.rule.title).font(.cardTitle).foregroundStyle(.primary)
+                        StatusBadge(risk: findings.rule.risk)
+                        Spacer()
+                        Text(ByteFormat.string(findings.totalBytes)).font(.rowValue).monospacedDigit().foregroundStyle(.primary)
+                        Button(allSelected(findings) ? "Deselect All" : "Select All") { toggleAll(findings) }
+                            .controlSize(.small)
+                            .disabled(!OperationsModel.canModifyFiles)
+                    }
+                }
+            }
+            if !checked.isEmpty {
+                Section {
+                    ForEach(checked) { findings in
+                        HStack(spacing: Spacing.xs) {
+                            Image(systemName: "checkmark.circle").foregroundStyle(.tertiary).accessibilityHidden(true)
+                            Text(findings.rule.title).font(.rowTitle).lineLimit(1)
+                            StatusBadge(risk: findings.rule.risk)
+                            Spacer(minLength: Spacing.s)
+                            Text(([emptyText(findings)] + (findings.protectedCount > 0 || findings.tooRecentCount > 0 ? [notes(findings)] : []))
+                                    .joined(separator: " · "))
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                        }
+                        .help("\(findings.rule.explanation)\nAfter removal: \(findings.rule.consequence)")
+                        .accessibilityElement(children: .combine)
+                    }
+                } header: {
+                    Text(found.isEmpty ? "Checked" : "Also checked").font(.cardTitle).foregroundStyle(.primary)
                 }
             }
         }
         .listStyle(.inset)
+        .listInCard()
+    }
+
+    /// Size found per rule, for the summary card.
+    static func segments(_ scan: RuleScanModel, tint: Color) -> [ChartSegment] {
+        scan.findings.enumerated().map { index, findings in
+            ChartSegment(id: findings.rule.id, label: findings.rule.title, bytes: findings.totalBytes,
+                         color: index == 0 ? tint : Palette.series[(index + 1) % Palette.series.count])
+        }
     }
 
     private func binding(for id: String) -> Binding<Bool> {
@@ -77,31 +107,44 @@ struct CleanerView: View {
     var body: some View {
         let scan = model.cleaner
         VStack(spacing: 0) {
-            header(scan)
-            Divider()
+            ScreenHeader(item: .cleaner, subtitle: subtitle(scan)) {
+                if scan.isScanning {
+                    ProgressView().controlSize(.small)
+                    Text(scan.currentRule ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Button("Stop") { scan.cancel() }
+                        .help("Stop looking. Nothing has been changed.")
+                } else {
+                    Button(scan.findings.isEmpty ? "Find Items" : "Check Again") { scan.scan(policy: model.operations.policy) }
+                        .disabled(model.operations.isExecuting)
+                        .help(model.operations.isExecuting ? "Wait until items are moved to the Trash." : "Look for caches and old logs. Read-only.")
+                }
+            }
+
             VStack(alignment: .leading, spacing: Spacing.s) {
                 OperationStatusPanel(types: [.cleanup])
                 if let error = scan.error { InlineBanner(kind: .error, title: "Review could not finish", message: error) }
                 OperationHistoryList(types: [.cleanup])
-            }
-            .padding(.horizontal, Spacing.l)
-            .padding(.vertical, Spacing.xs)
-
-            if scan.findings.isEmpty {
-                ContentUnavailableView {
-                    Label(scan.isScanning ? "Looking for caches and logs…" : "Review caches and logs",
-                          systemImage: "sparkles.rectangle.stack")
-                } description: {
-                    Text("MacVault lists app caches and old logs in your Library with their exact paths and sizes. Nothing is changed until you approve a list.")
-                } actions: {
-                    if !scan.isScanning {
+                if scan.findings.isEmpty && scan.isScanning {
+                    LoadingState(title: "Looking for caches and logs…", message: scan.currentRule)
+                } else if scan.findings.isEmpty {
+                    EmptyState(title: "Review caches and logs", symbol: SidebarItem.cleaner.symbol,
+                               message: "MacVault lists app caches and old logs in your Library with their exact paths and sizes. Nothing is changed until you approve a list.") {
                         Button("Find Items") { scan.scan(policy: model.operations.policy) }.buttonStyle(.borderedProminent)
                     }
+                } else {
+                    ReviewSummaryCard(title: "Found", symbol: "sparkles", tint: Palette.cleaner,
+                                      totalBytes: scan.findings.reduce(0) { $0 + $1.totalBytes },
+                                      itemCount: scan.allCandidates.count,
+                                      selectedCount: scan.selectedCandidates.count, selectedBytes: scan.selectedBytes,
+                                      segments: RuleFindingsList.segments(scan, tint: Palette.cleaner),
+                                      info: "Measured size of the items each rule offers. Apple and system caches are never offered.")
+                    RuleFindingsList(scan: scan)
                 }
-            } else {
-                RuleFindingsList(scan: scan)
             }
-            Divider()
+            .padding(.horizontal, Spacing.l)
+            .padding(.bottom, Spacing.m)
+            .frame(maxHeight: .infinity, alignment: .top)
+
             ReviewFooter(count: scan.selectedCandidates.count, bytes: scan.selectedBytes, buttonTitle: "Review & Move to Trash…",
                          disabled: model.operations.isExecuting || scan.isScanning) {
                 Task {
@@ -115,24 +158,7 @@ struct CleanerView: View {
         .navigationTitle("Cleaner")
     }
 
-    private func header(_ scan: RuleScanModel) -> some View {
-        HStack(spacing: Spacing.s) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Caches and logs").font(.headline)
-                Text(scan.lastScanned.map { "Checked \($0.relative) · rules \(RuleCatalog.version)" } ?? "Rules \(RuleCatalog.version)")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            if scan.isScanning {
-                ProgressView().controlSize(.small)
-                Text(scan.currentRule ?? "").font(.caption).foregroundStyle(.secondary)
-                Button("Stop") { scan.cancel() }
-            } else {
-                Button(scan.findings.isEmpty ? "Find Items" : "Check Again") { scan.scan(policy: model.operations.policy) }
-                    .disabled(model.operations.isExecuting)
-            }
-        }
-        .padding(.horizontal, Spacing.l)
-        .padding(.vertical, Spacing.s)
+    private func subtitle(_ scan: RuleScanModel) -> String {
+        "Caches and logs · " + (scan.lastScanned.map { "checked \($0.relative) · rules \(RuleCatalog.version)" } ?? "rules \(RuleCatalog.version)")
     }
 }

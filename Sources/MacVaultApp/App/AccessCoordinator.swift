@@ -57,7 +57,7 @@ final class AccessCoordinator {
     private let defaultsKey = "authorizedLocations.v1"
 
     init() {
-        if let data = UserDefaults.standard.data(forKey: defaultsKey),
+        if let data = AppEnvironment.defaults.data(forKey: defaultsKey),
            let decoded = try? JSONDecoder().decode([AuthorizedLocation].self, from: data) {
             locations = decoded
         }
@@ -65,7 +65,7 @@ final class AccessCoordinator {
 
     private func persist() {
         if let data = try? JSONEncoder().encode(locations) {
-            UserDefaults.standard.set(data, forKey: defaultsKey)
+            AppEnvironment.defaults.set(data, forKey: defaultsKey)
         }
     }
 
