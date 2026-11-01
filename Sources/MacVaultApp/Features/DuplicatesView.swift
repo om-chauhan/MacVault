@@ -163,10 +163,7 @@ struct DuplicatesView: View {
                                              onKeep: { dups.setKeeper(file.path, for: group) })
                         }
                     } header: {
-                        HStack(spacing: Spacing.xs) {
-                            Text("\(group.files.count) copies · \(ByteFormat.string(group.sizeBytes)) each")
-                                .font(.cardTitle).foregroundStyle(.primary).monospacedDigit()
-                            Spacer()
+                        ListSectionHeader(title: "\(group.files.count) copies · \(ByteFormat.string(group.sizeBytes)) each") {
                             TagPill(text: "Up to \(ByteFormat.string(group.reclaimableBytes))", tint: Palette.duplicates)
                         }
                     }
@@ -203,15 +200,21 @@ private struct DuplicateFileRow: View {
             Spacer()
             if let modified = file.modifiedAt {
                 Text(modified.formatted(date: .abbreviated, time: .omitted)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    .help("Modified \(modified.shortDateTime)")
             }
-            if isKeeper {
-                StatusBadge(text: "Keep", symbol: "star.fill", tint: Palette.success)
-            } else {
-                Button("Keep This") { onKeep() }.controlSize(.small)
-                    // Every row has this button, so its label names the file it keeps.
-                    .accessibilityLabel("Keep \(displayPath)")
-                    .accessibilityIdentifier("keep-\(file.path)")
+            // The badge and the button share one column width, so the dates beside them line up.
+            Group {
+                if isKeeper {
+                    StatusBadge(text: "Keep", symbol: "star.fill", tint: Palette.success)
+                } else {
+                    Button("Keep This") { onKeep() }.controlSize(.small)
+                        // Every row has this button, so its label names the file it keeps.
+                        .accessibilityLabel("Keep \(displayPath)")
+                        .accessibilityIdentifier("keep-\(file.path)")
+                        .help("Keep this copy and offer the others for removal")
+                }
             }
+            .frame(minWidth: Dimensions.rowActionWidth, alignment: .trailing)
         }
         .contextMenu {
             Button("Reveal in Finder") { FinderActions.reveal([file.path]) }

@@ -30,14 +30,13 @@ struct RuleFindingsList: View {
                     .listRowSeparator(.hidden)
                     .accessibilityElement(children: .combine)
                 } header: {
-                    HStack(spacing: Spacing.xs) {
-                        Text(findings.rule.title).font(.cardTitle).foregroundStyle(.primary)
-                        StatusBadge(risk: findings.rule.risk)
-                        Spacer()
-                        Text(ByteFormat.string(findings.totalBytes)).font(.rowValue).monospacedDigit().foregroundStyle(.primary)
+                    // The rule's size shares its right edge with the sizes of the rows below.
+                    ListSectionHeader(title: findings.rule.title, badge: StatusBadge(risk: findings.rule.risk),
+                                      value: ByteFormat.string(findings.totalBytes)) {
                         Button(allSelected(findings) ? "Deselect All" : "Select All") { toggleAll(findings) }
                             .controlSize(.small)
                             .disabled(!OperationsModel.canModifyFiles)
+                            .help(OperationsModel.canModifyFiles ? "Select or deselect every item of this rule" : OperationsModel.readOnlyExplanation)
                     }
                 }
             }
@@ -57,7 +56,7 @@ struct RuleFindingsList: View {
                         .accessibilityElement(children: .combine)
                     }
                 } header: {
-                    Text(found.isEmpty ? "Checked" : "Also checked").font(.cardTitle).foregroundStyle(.primary)
+                    ListSectionHeader(title: found.isEmpty ? "Checked" : "Also checked")
                 }
             }
         }

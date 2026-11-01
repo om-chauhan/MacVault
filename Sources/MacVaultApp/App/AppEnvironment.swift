@@ -62,6 +62,13 @@ enum AppEnvironment {
         defaults.removePersistentDomain(forName: suite)
         // No menu bar item or notifications during tests.
         defaults.set(false, forKey: "showMenuBarExtra")
+        // AppKit autosaves the window frame and the sidebar split state in the standard domain, so a
+        // run that ended with the sidebar collapsed would change how the next one starts. Tests always
+        // start with the sidebar shown and the window sized by MACVAULT_WINDOW_SIZE.
+        for key in UserDefaults.standard.dictionaryRepresentation().keys
+        where key.hasPrefix("NSSplitView Subview Frames") || key.hasPrefix("NSWindow Frame") {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
         return defaults
     }()
 
@@ -115,6 +122,14 @@ extension AppEnvironment {
     /// tiny fixture. Zero in release builds. Cancelling the scan ends the wait.
     static var uiTestScanDelay: Double {
         testValue("MACVAULT_SCAN_DELAY").flatMap(Double.init) ?? 0
+    }
+
+    /// UI tests only: whether the first-launch permissions sheet opens. Tests start with a fresh
+    /// settings suite, so without this the sheet would cover every screen in every test; the test
+    /// that checks the sheet sets `MACVAULT_SHOW_PERMISSIONS=1`. Follows the setting otherwise.
+    static var showsFirstLaunchPermissions: Bool {
+        guard isUITesting else { return true }
+        return testValue("MACVAULT_SHOW_PERMISSIONS") == "1"
     }
 
     /// UI tests only: the app's appearance, from `MACVAULT_APPEARANCE` ("light" or "dark"), so the

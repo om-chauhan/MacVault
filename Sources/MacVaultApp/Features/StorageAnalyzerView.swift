@@ -16,14 +16,30 @@ struct StorageAnalyzerView: View {
     @State private var mode: Mode = .breakdown
     @State private var search = ""
     @State private var showIssues = false
+    @State private var showPathEntry = false
+    @State private var locationError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ScreenHeader(item: .analyzer, subtitle: "Read-only scans of folders you choose") { controls }
+            ScreenHeader(item: .analyzer, subtitle: "Read-only scans of your Mac or any folder you choose") { controls }
             content
         }
         .navigationTitle("Storage Analyzer")
         .animation(Motion.standard(reduceMotion: reduceMotion), value: model.isScanning)
+        .sheet(isPresented: $showPathEntry) {
+            PathEntrySheet { path in await model.addLocation(path: path) }
+        }
+        .alert("Location could not be added", isPresented: Binding(
+            get: { locationError != nil }, set: { if !$0 { locationError = nil } }
+        )) {
+            Button("OK", role: .cancel) { locationError = nil }
+        } message: {
+            Text(locationError ?? "")
+        }
+    }
+
+    private func selectWholeMac() {
+        Task { locationError = await model.selectWholeMac() }
     }
 
     // MARK: Controls
@@ -31,17 +47,30 @@ struct StorageAnalyzerView: View {
     @ViewBuilder
     private var controls: some View {
         Menu {
-            ForEach(model.access.locations) { location in
-                Button(location.displayPath) { Task { await model.selectLocation(location.id) } }
+            Button {
+                selectWholeMac()
+            } label: {
+                Label("Whole Mac (\(AuthorizedLocation.startupDiskName))", systemImage: "internaldrive")
             }
-            if !model.access.locations.isEmpty { Divider() }
+            let folders = model.access.locations.filter { !$0.isWholeVolume }
+            if !folders.isEmpty {
+                Divider()
+                ForEach(folders) { location in
+                    Button(location.displayPath) { Task { await model.selectLocation(location.id) } }
+                }
+            }
+            Divider()
             Button("Choose Folder…") { Task { await model.chooseAndAddLocation() } }
+            Button("Enter Path…") { showPathEntry = true }
         } label: {
-            Label((model.selectedLocation?.displayName ?? "Choose a folder").middleTruncated(28), systemImage: "folder")
+            Label((model.selectedLocation?.displayName ?? "Choose what to scan").middleTruncated(28),
+                  systemImage: model.selectedLocation?.isWholeVolume == true ? "internaldrive" : "folder")
         }
         .fixedSize()
         .disabled(model.isScanning)
-        .help(model.selectedLocation.map { "Folder to scan: \($0.path)" } ?? "Choose a folder to scan")
+        .accessibilityIdentifier("scopeMenu")
+        .help(model.selectedLocation.map { $0.isWholeVolume ? "Scope: the whole startup disk" : "Folder to scan: \($0.path)" }
+              ?? "Choose the whole Mac or a folder to scan")
 
         let pastScans = model.scans(for: model.selectedLocation)
         if pastScans.count > 1 {
@@ -54,9 +83,13 @@ struct StorageAnalyzerView: View {
             } label: {
                 Label("History", systemImage: "clock.arrow.circlepath")
             }
+            // Icon only, so the scope menu, this menu and the Scan button fit beside the status line
+            // at the minimum window width; the label stays for VoiceOver and the help.
+            .labelStyle(.iconOnly)
             .fixedSize()
             .disabled(model.isScanning)
-            .help("Show an earlier scan of this folder")
+            .accessibilityLabel("Scan history")
+            .help("Show an earlier scan of this folder (\(pastScans.count) scans)")
         }
 
         if model.isScanning {
@@ -74,7 +107,7 @@ struct StorageAnalyzerView: View {
             .buttonStyle(.borderedProminent)
             .disabled(model.selectedLocation == nil || model.store == nil)
             .accessibilityIdentifier("scanButton")
-            .help(model.selectedLocation == nil ? "Choose a folder first." : "Read-only scan. Nothing is moved or deleted.")
+            .help(model.selectedLocation == nil ? "Choose what to scan first." : "Read-only scan. Nothing is moved or deleted.")
         }
     }
 
@@ -83,10 +116,18 @@ struct StorageAnalyzerView: View {
     @ViewBuilder
     private var content: some View {
         if model.access.locations.isEmpty {
-            EmptyState(title: "Choose a folder to analyze", symbol: "folder.badge.plus",
-                       message: "MacVault scans only folders you choose and never changes them. Choose your home folder for the broadest view.") {
-                Button("Choose Folder…") { Task { await model.chooseAndAddLocation() } }
+            EmptyState(title: "Choose what to analyze", symbol: "folder.badge.plus",
+                       message: "Scan the whole Mac to see where all the space goes, or pick a single folder or path. Scans only read; nothing is changed.") {
+                HStack(spacing: Spacing.s) {
+                    Button {
+                        selectWholeMac()
+                    } label: {
+                        Label("Whole Mac", systemImage: "internaldrive")
+                    }
                     .buttonStyle(.borderedProminent)
+                    Button("Choose Folder…") { Task { await model.chooseAndAddLocation() } }
+                    Button("Enter Path…") { showPathEntry = true }
+                }
             }
         } else {
             VStack(alignment: .leading, spacing: Spacing.s) {
@@ -130,14 +171,67 @@ struct StorageAnalyzerView: View {
                                  message: "The breakdown, treemap and largest files appear when the scan finishes. Nothing is changed.")
                 } else {
                     // The Scan button is in the header, where it is on every visit.
+                    let wholeMac = model.selectedLocation?.isWholeVolume == true
                     EmptyState(title: "Not scanned yet", symbol: SidebarItem.analyzer.symbol,
-                               message: "Scan “\(model.selectedLocation?.displayName ?? "this folder")” to see what uses space inside it. Scans only read; nothing is changed.")
+                               message: wholeMac
+                                   ? "Scan the whole Mac to see what uses space on \(model.selectedLocation?.displayName ?? "the startup disk"). This reads every folder, so it takes longer than a single folder. Scans only read; nothing is changed."
+                                   : "Scan “\(model.selectedLocation?.displayName ?? "this folder")” to see what uses space inside it. Scans only read; nothing is changed.")
                         .help(model.selectedLocation?.path ?? "")
                 }
             }
             .padding(.horizontal, Spacing.l)
             .padding(.bottom, Spacing.m)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+}
+
+// MARK: - Path entry
+
+/// Lets the user type or paste a folder path instead of using the open panel. "~" is accepted.
+struct PathEntrySheet: View {
+    /// Adds the path; returns a message when it cannot be used.
+    let add: (String) async -> String?
+    @Environment(\.dismiss) private var dismiss
+    @State private var path = ""
+    @State private var error: String?
+    @State private var isAdding = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.m) {
+            SheetHeader(title: "Scan a specific path", subtitle: "Added to the folders MacVault may scan",
+                        symbol: "folder.badge.plus", tint: Palette.analyzer)
+            Text("Enter the full path of a folder on this Mac or an attached volume. MacVault only reads it; nothing is changed.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            TextField("/Users/Shared or ~/Downloads", text: $path)
+                .textFieldStyle(.roundedBorder)
+                .font(.body.monospaced())
+                .accessibilityIdentifier("pathField")
+                .onSubmit { submit() }
+            if let error {
+                InlineBanner(kind: .error, title: "Path could not be used", message: error)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Add and Select") { submit() }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(path.trimmingCharacters(in: .whitespaces).isEmpty || isAdding)
+                    .accessibilityIdentifier("addPathButton")
+            }
+        }
+        .padding(Spacing.l)
+        .frame(width: Dimensions.sheetWidth - Spacing.xl * 4)
+    }
+
+    private func submit() {
+        guard !isAdding else { return }
+        isAdding = true
+        Task {
+            let message = await add(path)
+            isAdding = false
+            if let message { error = message } else { dismiss() }
         }
     }
 }
@@ -151,29 +245,20 @@ struct ScanProgressPanel: View {
         Card("Scanning…", symbol: "magnifyingglass", tint: Palette.analyzer,
              trailing: AnyView(Text(Duration.seconds(progress.elapsedSeconds).formatted(.time(pattern: .minuteSecond)))
                 .font(.rowValue).monospacedDigit().foregroundStyle(.secondary))) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: Spacing.xl) { metrics }
-                VStack(alignment: .leading, spacing: Spacing.s) { metrics }
-            }
+            MetricGrid(items: [
+                MetricItem("Observed so far", value: bytes(progress.logicalBytes), size: .hero),
+                MetricItem("Files", value: progress.filesVisited.formatted()),
+                MetricItem("Folders", value: progress.directoriesVisited.formatted()),
+                MetricItem("Not readable", value: progress.inaccessibleItems.formatted()),
+            ])
             // Total work is unknown during traversal, so progress is indeterminate.
-            ProgressView().progressViewStyle(.linear).tint(Palette.analyzer)
+            ProgressView().progressViewStyle(.linear).tint(Palette.analyzer).controlSize(.small)
             if !progress.currentDirectory.isEmpty {
                 PathText(path: progress.currentDirectory, small: true)
             }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Scan in progress, \(progress.filesVisited) files read")
-    }
-
-    @ViewBuilder
-    private var metrics: some View {
-        Metric(label: "Observed so far", value: bytes(progress.logicalBytes), size: .hero)
-        HStack(alignment: .top, spacing: Spacing.l) {
-            Metric(label: "Files", value: progress.filesVisited.formatted(), size: .tile)
-            Metric(label: "Folders", value: progress.directoriesVisited.formatted(), size: .tile)
-            Metric(label: "Not readable", value: progress.inaccessibleItems.formatted(), size: .tile)
-        }
-        Spacer(minLength: 0)
     }
 }
 
@@ -197,17 +282,12 @@ struct ScanSummaryHeader: View {
                      Text("Scanned \(scan.startedAt.shortDateTime)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                      StatusBadge(status: scan.status)
                  })) {
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: Spacing.xl) {
-                        hero
-                        details
-                        Spacer(minLength: 0)
-                    }
-                    VStack(alignment: .leading, spacing: Spacing.s) {
-                        hero
-                        details
-                    }
-                }
+                MetricGrid(items: [
+                    MetricItem("Observed size", value: bytes(scan.bytesObserved), caption: "Logical sum of files", size: .hero),
+                    MetricItem("Allocated", value: bytes(scan.allocatedBytesObserved), caption: "May exceed use (APFS clones)"),
+                    MetricItem("Files", value: scan.filesVisited.formatted()),
+                    MetricItem("Folders", value: scan.directoriesVisited.formatted()),
+                ])
                 let notes = coverageNotes
                 if !notes.isEmpty {
                     Text(notes.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
@@ -217,25 +297,15 @@ struct ScanSummaryHeader: View {
         }
     }
 
-    private var hero: some View {
-        Metric(label: "Observed size", value: bytes(scan.bytesObserved), caption: "Logical sum of files", size: .hero)
-    }
-
-    private var details: some View {
-        HStack(alignment: .top, spacing: Spacing.l) {
-            Metric(label: "Allocated", value: bytes(scan.allocatedBytesObserved), caption: "May exceed use (APFS clones)", size: .tile)
-            Metric(label: "Files", value: scan.filesVisited.formatted(),  size: .tile)
-            Metric(label: "Folders", value: scan.directoriesVisited.formatted(),  size: .tile)
-        }
-    }
-
     @ViewBuilder
     private var statusBanner: some View {
         let unreadable = scan.inaccessibleItems + scan.errorCount
         switch scan.status {
         case .partial:
             InlineBanner(kind: .warning, title: "Scan incomplete — \(unreadable) item\(unreadable == 1 ? "" : "s") could not be accessed",
-                         message: "Sizes are lower bounds where items could not be read.",
+                         message: scan.rootPath == ScanConfiguration.wholeVolumeRoot
+                             ? "Sizes are lower bounds where items could not be read. macOS protects some folders (Mail, Messages, Safari, other users): grant MacVault Full Disk Access in System Settings › Privacy & Security to include them."
+                             : "Sizes are lower bounds where items could not be read.",
                          actionTitle: issues.contains { $0.kind != .mountPointSkipped } ? (showIssues ? "Hide" : "Show Items") : nil) {
                 showIssues.toggle()
             }
@@ -339,9 +409,11 @@ struct LargestFilesTable: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text("Files of \(ByteFormat.string(thresholdBytes)) or more · \(findings.count) found · review only, not assessed for removal")
-                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+        Card("Largest Files", symbol: "doc.fill", tint: Palette.analyzer,
+             info: "The largest files recorded by the scan (up to 500). Listed for review only; they are not assessed for removal.",
+             trailing: AnyView(Text("Files of \(ByteFormat.string(thresholdBytes)) or more · \(counted(findings.count, "file"))")
+                .font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)),
+             flush: true) {
             if findings.isEmpty {
                 EmptyState(title: "No files at or above \(ByteFormat.string(thresholdBytes))", symbol: "doc",
                            message: "Lower the threshold in Settings to list smaller files on the next scan.")
@@ -370,7 +442,7 @@ struct LargestFilesTable: View {
                             .help(row.location)
                     }
                 }
-                .listInCard()
+                .scrollContentBackground(.hidden)
                 .contextMenu(forSelectionType: FileRow.ID.self) { ids in
                     let picked = rows.filter { ids.contains($0.id) }
                     Button("Reveal in Finder") { FinderActions.reveal(picked.map(\.path)) }
@@ -383,6 +455,7 @@ struct LargestFilesTable: View {
                 }
             }
         }
+        .environment(\.cardFillsHeight, true)
         .sheet(item: $inspected) { row in
             FileDetailSheet(row: row)
         }
@@ -395,9 +468,9 @@ struct FileDetailSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.m) {
-            Label(row.name, systemImage: "doc").font(.title3.weight(.semibold))
+            SheetHeader(title: row.name, subtitle: row.location, symbol: "doc.fill", tint: Palette.analyzer)
             Grid(alignment: .leading, horizontalSpacing: Spacing.m, verticalSpacing: Spacing.xs) {
-                GridRow { Text("Path").foregroundStyle(.secondary); Text(row.path).textSelection(.enabled) }
+                GridRow { Text("Path").foregroundStyle(.secondary); Text(row.path).font(.path).textSelection(.enabled) }
                 GridRow { Text("Size").foregroundStyle(.secondary); Text(row.size < 0 ? "Unknown" : ByteFormat.string(row.size)) }
                 GridRow { Text("Allocated").foregroundStyle(.secondary); Text(row.allocated < 0 ? "Unknown" : ByteFormat.string(row.allocated)) }
                 GridRow { Text("Modified").foregroundStyle(.secondary); Text(row.modified == .distantPast ? "Unknown" : row.modified.shortDateTime) }

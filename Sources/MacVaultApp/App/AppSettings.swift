@@ -43,6 +43,10 @@ final class AppSettings {
     var showMenuBarExtra: Bool {
         didSet { defaults.set(showMenuBarExtra, forKey: "showMenuBarExtra") }
     }
+    /// The permissions sheet was shown once (first launch); afterwards it opens only on request.
+    var permissionsConsentShown: Bool {
+        didSet { defaults.set(permissionsConsentShown, forKey: "permissionsConsentShown") }
+    }
 
     init() {
         let threshold = defaults.integer(forKey: "largeFileThresholdMB")
@@ -59,6 +63,7 @@ final class AppSettings {
         lowStorageThresholdPercent = (1...50).contains(percent) ? percent : 10
         lowStorageWarnedVolumes = defaults.stringArray(forKey: "lowStorageWarnedVolumes") ?? []
         showMenuBarExtra = defaults.object(forKey: "showMenuBarExtra") as? Bool ?? true
+        permissionsConsentShown = defaults.bool(forKey: "permissionsConsentShown")
     }
 
     var largeFileThresholdBytes: Int64 { Int64(largeFileThresholdMB) * 1_000_000 }

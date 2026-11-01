@@ -39,7 +39,10 @@ targets.append(
 
 let package = Package(
     name: "MacVault",
-    platforms: [.macOS(.v14)],
+    // iOS is listed only so Xcode can type-check MacVaultCore when an iOS destination is selected
+    // (Duration and Clock need iOS 16). The app product is macOS-only; run the MacVaultApp scheme
+    // against "My Mac".
+    platforms: [.macOS(.v14), .iOS(.v16)],
     products: products,
     targets: targets
 )

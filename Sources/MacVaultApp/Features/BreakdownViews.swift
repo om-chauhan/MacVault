@@ -69,8 +69,12 @@ struct DrillDownBreakdown: View {
         HStack(alignment: .top, spacing: Spacing.m) {
             CompositionCard(title: current?.name ?? folderName, entries: entries, colors: colors, footer: footer)
                 .frame(width: Dimensions.compositionWidth)
-            VStack(alignment: .leading, spacing: Spacing.s) {
+            // The breakdown card: its header row (the breadcrumbs) lines up with the Composition card's
+            // header, and the list or treemap fills the rest.
+            VStack(alignment: .leading, spacing: Spacing.xs) {
                 breadcrumbs
+                    .padding(.horizontal, Spacing.m)
+                    .padding(.top, Spacing.m)
                 if loading {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if entries.isEmpty {
@@ -84,12 +88,14 @@ struct DrillDownBreakdown: View {
                     case .treemap:
                         TreemapView(entries: Array(entries.prefix(150)), colors: colors, onOpen: open)
                             .clipShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
-                            .padding(Spacing.xs)
-                            .cardSurface()
+                            .padding(.horizontal, Spacing.m)
+                            .padding(.bottom, Spacing.m)
                     }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .clipShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+            .cardSurface()
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .task(id: "\(scan.id)|\(current?.path ?? "")") { await load() }
@@ -117,20 +123,31 @@ struct DrillDownBreakdown: View {
         trail.append(entry)
     }
 
+    /// Card header: where in the scan the list below is, as a trail of link buttons. The current
+    /// level is the bold title, like every other card's title.
     private var breadcrumbs: some View {
         HStack(spacing: Spacing.xxs) {
+            Image(systemName: "folder.fill").font(.cardTitle).foregroundStyle(Palette.analyzer)
+                .padding(.trailing, Spacing.xxs).accessibilityHidden(true)
             Button(folderName) { trail = [] }
                 .buttonStyle(.link)
+                .font(trail.isEmpty ? .cardTitle : .callout.weight(.medium))
+                .foregroundStyle(trail.isEmpty ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                 .disabled(trail.isEmpty)
                 .help(scan.scopeDescription)
+                .accessibilityAddTraits(trail.isEmpty ? .isHeader : [])
             ForEach(Array(trail.enumerated()), id: \.element.id) { index, crumb in
+                let last = index == trail.count - 1
                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary).accessibilityHidden(true)
                 Button(crumb.name) { trail = Array(trail.prefix(index + 1)) }
                     .accessibilityIdentifier("crumb-\(crumb.name)")
                     .buttonStyle(.link)
-                    .disabled(index == trail.count - 1)
+                    .font(last ? .cardTitle : .callout.weight(.medium))
+                    .foregroundStyle(last ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                    .disabled(last)
+                    .accessibilityAddTraits(last ? .isHeader : [])
             }
-            Spacer()
+            Spacer(minLength: Spacing.s)
             if let current {
                 Text(ByteFormat.string(current.logicalBytes)).font(.rowValue).monospacedDigit().foregroundStyle(.secondary)
                 Button { trail.removeLast() } label: { Label("Up", systemImage: "arrow.up") }
@@ -139,7 +156,6 @@ struct DrillDownBreakdown: View {
                     .help("Up one level (⌘↑)")
             }
         }
-        .font(.callout.weight(.medium))
         .frame(minHeight: Spacing.l)
         .lineLimit(1)
         .accessibilityElement(children: .contain)
@@ -163,7 +179,7 @@ struct DrillDownBreakdown: View {
                 .accessibilityIdentifier("breakdownRow-\(entry.name)")
         }
         .listStyle(.inset)
-        .listInCard()
+        .scrollContentBackground(.hidden)
     }
 }
 
@@ -241,7 +257,7 @@ private struct DrillRow: View {
             .frame(minWidth: Spacing.l, maxHeight: Spacing.xs)
             .accessibilityHidden(true)
             Text(ByteFormat.string(entry.logicalBytes)).font(.rowValue).monospacedDigit()
-                .frame(minWidth: 72, alignment: .trailing)
+                .frame(minWidth: Dimensions.rowValueWidth, alignment: .trailing)
             Text(entry.fileCount.map { counted($0, "file") } ?? "")
                 .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                 .frame(minWidth: 64, alignment: .trailing)

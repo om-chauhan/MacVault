@@ -12,8 +12,21 @@ struct AuthorizedLocation: Identifiable, Codable, Hashable {
     var isSecurityScoped: Bool
     let addedAt: Date
 
-    var displayName: String { (path as NSString).lastPathComponent.isEmpty ? path : (path as NSString).lastPathComponent }
-    var displayPath: String { PathUtilities.abbreviatingHome(path) }
+    /// True for the startup disk as a whole (root path "/").
+    var isWholeVolume: Bool { path == ScanConfiguration.wholeVolumeRoot }
+
+    var displayName: String {
+        if isWholeVolume { return Self.startupDiskName }
+        let last = (path as NSString).lastPathComponent
+        return last.isEmpty ? path : last
+    }
+    var displayPath: String { isWholeVolume ? "\(Self.startupDiskName) — whole Mac" : PathUtilities.abbreviatingHome(path) }
+
+    /// The Finder name of the startup disk, e.g. "Macintosh HD".
+    static var startupDiskName: String {
+        let name = FileManager.default.displayName(atPath: ScanConfiguration.wholeVolumeRoot)
+        return name.isEmpty ? "Startup Disk" : name
+    }
 }
 
 enum LocationStatus: Error, Equatable {
@@ -80,6 +93,37 @@ final class AccessCoordinator {
         panel.message = message
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         return add(url)
+    }
+
+    /// Why a typed path could not be added, with a message the user can act on.
+    struct PathError: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    /// Adds a folder from a typed path ("~" is expanded).
+    func addPath(_ rawPath: String) -> Result<AuthorizedLocation, PathError> {
+        let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .failure(PathError(message: "Enter a folder path.")) }
+        let path = PathUtilities.canonicalize(trimmed)
+        let shown = PathUtilities.abbreviatingHome(path)
+        guard path.hasPrefix("/") else {
+            return .failure(PathError(message: "Enter an absolute path, such as /Users/Shared or ~/Downloads."))
+        }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else {
+            return .failure(PathError(message: "No folder exists at \(shown)."))
+        }
+        guard isDirectory.boolValue else {
+            return .failure(PathError(message: "\(shown) is a file. Enter the folder that contains it."))
+        }
+        guard FileManager.default.isReadableFile(atPath: path) else {
+            return .failure(PathError(message: "MacVault is not allowed to read \(shown). Use Choose Folder… so macOS can grant access."))
+        }
+        guard let location = add(URL(fileURLWithPath: path, isDirectory: true)) else {
+            return .failure(PathError(message: "Access to \(shown) could not be saved. Use Choose Folder… so macOS can grant access."))
+        }
+        return .success(location)
     }
 
     @discardableResult

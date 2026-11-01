@@ -2,11 +2,17 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+
+    /// With the sidebar collapsed, the window controls and the sidebar toggle move into the detail's
+    /// title bar row, so the screen header must sit below that row instead of inside it.
+    private var sidebarCollapsed: Bool { columnVisibility == .detailOnly }
 
     var body: some View {
         @Bindable var model = model
         @Bindable var operations = model.operations
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             List(selection: $model.selection) {
                 Section {
                     ForEach([SidebarItem.overview, .analyzer]) { row($0) }
@@ -18,8 +24,13 @@ struct RootView: View {
                     ForEach([SidebarItem.activity, .settings]) { row($0) }
                 }
             }
-            // The max also bounds HSplitViews in the detail, which count the sidebar twice (see ApplicationsView).
+            // The max keeps the detail at least 720 pt wide at the minimum window, which the fixed-width
+            // inspector cards (Applications, Activity) and their tables are sized for.
             .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 240)
+            // MacVault's own toggle (on the detail) replaces the system one: when the window is restored
+            // with the sidebar collapsed, the system toggle, which lives in the sidebar column, never
+            // appears, leaving no way to bring the sidebar back.
+            .toolbar(removing: .sidebarToggle)
             .safeAreaInset(edge: .bottom) {
                 if model.operations.isExecuting {
                     HStack(spacing: Spacing.xs) {
@@ -48,9 +59,17 @@ struct RootView: View {
             detail(for: model.selection ?? .overview)
                 .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
                 .canvasBackground()
-                // The canvas continues under the (empty) toolbar instead of a separate bar above it.
+                // The compact toolbar row holds only the window controls and the sidebar toggle; its
+                // background is hidden so the canvas runs up to the window edge and every screen header
+                // sits just below it, whether the sidebar is shown or collapsed.
                 .toolbarBackground(.hidden, for: .windowToolbar)
+                .toolbar {
+                    ToolbarItem(placement: .navigation) { sidebarToggle }
+                }
                 .modifier(InContentTitle())
+        }
+        .sheet(isPresented: $model.showPermissions) {
+            PermissionsSheet()
         }
         .sheet(item: $operations.pendingReview) { pending in
             ApprovalSheet(pending: pending,
@@ -58,6 +77,18 @@ struct RootView: View {
                           onCancel: { Task { await model.operations.discardPending() } })
                 .interactiveDismissDisabled()
         }
+    }
+
+    private var sidebarToggle: some View {
+        Button {
+            withAnimation(Motion.standard(reduceMotion: reduceMotion)) {
+                columnVisibility = sidebarCollapsed ? .all : .detailOnly
+            }
+        } label: {
+            Label(sidebarCollapsed ? "Show Sidebar" : "Hide Sidebar", systemImage: "sidebar.leading")
+        }
+        .help(sidebarCollapsed ? "Show the sidebar" : "Hide the sidebar")
+        .accessibilityIdentifier("sidebarToggle")
     }
 
     private func row(_ item: SidebarItem) -> some View {

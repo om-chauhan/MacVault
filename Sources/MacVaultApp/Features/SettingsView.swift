@@ -77,13 +77,13 @@ struct SettingsView: View {
                     }
                 }
                 Button("Add Folder…") { Task { await model.chooseAndAddLocation() } }
-                #if !APPSTORE
-                Button("Open Full Disk Access Settings…") {
-                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-                        NSWorkspace.shared.open(url)
-                    }
+                HStack {
+                    Button("Review Permissions…") { model.showPermissions = true }
+                        .help("Every permission MacVault uses, its current state, and one button to grant them all")
+                    #if !APPSTORE
+                    Button("Open Full Disk Access Settings…") { PermissionsModel.openSystemSettings(.fullDiskAccess) }
+                    #endif
                 }
-                #endif
             } header: {
                 Text("Access")
             } footer: {

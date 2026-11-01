@@ -15,7 +15,8 @@ struct MacVaultApp: App {
                 .uiTestWindowSize()
                 .task { await model.start() }
         }
-        .windowToolbarStyle(.unified)
+        // Compact: the toolbar row only holds the window controls and the sidebar toggle.
+        .windowToolbarStyle(.unifiedCompact)
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandMenu("Scan") {

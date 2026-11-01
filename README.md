@@ -30,6 +30,10 @@ Documentation/                decisions (ADRs), capability matrix
 ```
 
 ## Run on a Mac (Xcode 15.3+ / Swift 5.10+, macOS 14+)
+In Xcode, open `Package.swift` and select the **MacVaultApp** scheme with the **My Mac** destination, then press Run.
+The default `MacVault-Package` scheme only builds libraries and has nothing to launch.
+
+From the command line:
 ```bash
 swift test                       # core test suite
 swift run MacVaultApp            # launches the app (unbundled, Direct-edition behavior)

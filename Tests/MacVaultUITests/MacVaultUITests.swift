@@ -296,8 +296,9 @@ final class MacVaultUITests: XCTestCase {
         waitUntil("leftovers moved") { !fixture.exists("home/Library/Caches/com.example.editor") }
     }
 
-    /// At the minimum window width, with the widest sidebar and the app detail pane dragged to its
-    /// narrowest, the detail's buttons stay inside the window at their full width (not truncated).
+    /// At the minimum window width with the widest sidebar (the app detail is a fixed-width inspector
+    /// card, so this is its narrowest layout), the detail's buttons stay inside the window at their
+    /// full width (not truncated).
     func testApplicationsDetailFitsNarrowestLayout() {
         open("Applications")
         button("List Applications").click()
@@ -310,8 +311,8 @@ final class MacVaultUITests: XCTestCase {
         for title in titles { assertInsideWindow(button(title), "Applications “\(title)” button (default layout)") }
         let fullWidths = titles.map { button($0).frame.width }
 
-        // Narrowest: minimum window width (dragging the right edge; the height is kept), the widest
-        // sidebar, then the app list's divider dragged as far right as it goes.
+        // Narrowest: minimum window width (dragging the right edge; the height is kept) and the widest
+        // sidebar. The detail card has a fixed width, so nothing else can squeeze it.
         let window = app.windows.firstMatch
         let corner = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 1)).withOffset(CGVector(dx: -2, dy: -2))
         corner.click(forDuration: 0.3, thenDragTo: corner.withOffset(CGVector(dx: 960 - window.frame.width - 100, dy: 0)))
@@ -319,27 +320,114 @@ final class MacVaultUITests: XCTestCase {
         func splitters() -> [XCUIElement] {
             (0..<app.splitters.count).map { app.splitters.element(boundBy: $0) }.sorted { $0.frame.minX < $1.frame.minX }
         }
-        XCTAssertEqual(splitters().count, 2, "sidebar divider and app list divider")
-        // Drag targets stay on screen (off-screen drags are dropped): the sidebar divider 60 pt right
-        // (its maximum is 20 pt away), then the list divider to near the window's right edge.
-        for (index, distance) in [(0, CGFloat(60)), (1, window.frame.maxX - 10 - splitters()[1].frame.midX)] {
-            let handle = splitters()[index].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            handle.click(forDuration: 0.3, thenDragTo: handle.withOffset(CGVector(dx: distance, dy: 0)))
-        }
-        let (sidebar, divider) = (splitters()[0], splitters()[1])
-        let sidebarWidth = sidebar.frame.minX - window.frame.minX
-        let detailWidth = window.frame.maxX - divider.frame.maxX
+        XCTAssertGreaterThanOrEqual(splitters().count, 1, "sidebar divider")
+        // The drag target stays on screen (off-screen drags are dropped): the sidebar divider 60 pt
+        // right (its maximum is 20 pt away).
+        let handle = splitters()[0].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        handle.click(forDuration: 0.3, thenDragTo: handle.withOffset(CGVector(dx: 60, dy: 0)))
+        let sidebarWidth = splitters()[0].frame.minX - window.frame.minX
         XCTAssertGreaterThanOrEqual(sidebarWidth, 238, "sidebar dragged to its widest (240)")
-        XCTAssertLessThanOrEqual(detailWidth, 240, "detail pane dragged to its narrowest (230)")
 
         for (title, fullWidth) in zip(titles, fullWidths) {
             let element = button(title)
             XCTAssertTrue(element.exists, "“\(title)” exists with its full title")
-            assertInsideWindow(element, "Applications “\(title)” button (narrowest detail, \(detailWidth) pt)")
+            assertInsideWindow(element, "Applications “\(title)” button (narrowest layout)")
             if element.frame.width < fullWidth - 1 { dumpHierarchy("truncated: \(title)") }
             XCTAssertGreaterThanOrEqual(element.frame.width, fullWidth - 1,
                                         "“\(title)” is not truncated: \(element.frame.width) pt wide, \(fullWidth) pt at full width")
         }
+    }
+
+    /// The sidebar toggle collapses and expands the sidebar, and in both states the screen header
+    /// (title) stays visible and clear of the toggle button, which stays hittable.
+    func testSidebarCollapsesAndExpands() {
+        let window = app.windows.firstMatch
+        let toggle = app.descendants(matching: .any)["sidebarToggle"].firstMatch
+        wait(toggle, "sidebar toggle")
+        // "Overview" is both a sidebar row and the screen header; the header is the topmost one.
+        func headerTitle() -> XCUIElement? {
+            app.staticTexts.matching(NSPredicate(format: "label == %@ OR value == %@", "Overview", "Overview"))
+                .allElementsBoundByIndex.filter(\.exists).min { $0.frame.minY < $1.frame.minY }
+        }
+        let deadline = Date().addingTimeInterval(10)
+        while headerTitle() == nil && Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.2)) }
+        guard let title = headerTitle() else { dumpHierarchy("no Overview header"); return XCTFail("Overview header title not found") }
+        let sidebarRow = wait(app.outlines.staticTexts["Storage Analyzer"], "sidebar row before collapsing")
+        attachScreenshot("sidebar-expanded")
+        XCTAssertFalse(title.frame.intersects(toggle.frame),
+                       "header title \(title.frame) must not overlap the sidebar toggle \(toggle.frame) with the sidebar shown")
+
+        toggle.click()
+        let collapsed = NSPredicate(format: "exists == false || isHittable == false")
+        _ = XCTWaiter.wait(for: [expectation(for: collapsed, evaluatedWith: sidebarRow)], timeout: 5)
+        attachScreenshot("sidebar-collapsed")
+        XCTAssertFalse(sidebarRow.isHittable, "sidebar rows are hidden after collapsing")
+        // The toolbar is rebuilt while the column animates away; the toggle comes back in the detail's section.
+        wait(toggle, "sidebar toggle after collapsing", timeout: 10)
+        XCTAssertTrue(toggle.isHittable, "toggle is still clickable when collapsed (frame \(toggle.frame))")
+        let collapsedTitle = headerTitle() ?? title
+        XCTAssertTrue(collapsedTitle.exists && collapsedTitle.isHittable, "header title visible when collapsed")
+        XCTAssertTrue(window.frame.contains(collapsedTitle.frame), "header title inside the window when collapsed")
+        let overlaps = collapsedTitle.frame.intersects(toggle.frame)
+        if overlaps { dumpHierarchy("collapsed sidebar: title overlaps toggle") }
+        XCTAssertFalse(overlaps, "header title \(collapsedTitle.frame) must not overlap the sidebar toggle \(toggle.frame)")
+        // The header moves below the title bar row that now holds the window controls and the toggle.
+        XCTAssertGreaterThanOrEqual(collapsedTitle.frame.minY, toggle.frame.maxY - 1,
+                                    "header sits below the toggle row when the sidebar is collapsed")
+
+        toggle.click()
+        _ = sidebarRow.waitForExistence(timeout: 5)
+        wait(toggle, "sidebar toggle after expanding", timeout: 10)
+        attachScreenshot("sidebar-expanded-again")
+        XCTAssertTrue(sidebarRow.isHittable, "sidebar rows are back after expanding")
+        open("Storage Analyzer")
+        wait(app.buttons["scanButton"], "scan button after re-expanding")
+    }
+
+    /// First launch shows one permissions sheet with every permission, its state and "Allow All";
+    /// "Not Now" dismisses it and it can be reopened from the Overview card. The test never clicks
+    /// "Allow All": that would show real macOS dialogs on the test Mac.
+    func testPermissionsSheetShowsEverythingAtOnce() {
+        // Relaunch as a first launch that shows the sheet (tests otherwise suppress it).
+        app.terminate()
+        app.launchEnvironment["MACVAULT_SHOW_PERMISSIONS"] = "1"
+        app.launch()
+        app.activate()
+        let sheet = app.sheets.firstMatch
+        XCTAssertTrue(sheet.waitForExistence(timeout: 30), "permissions sheet opens on first launch")
+        attachScreenshot("permissions-sheet")
+        wait(text(containing: "Allow MacVault to read your Mac"), "sheet title")
+        let allowAll = wait(app.descendants(matching: .any)["permissionsAllowAll"].firstMatch, "Allow All")
+        XCTAssertTrue(allowAll.isEnabled, "Allow All is the one consent button and is enabled")
+        // Each row is one combined accessibility element (title, status, description).
+        for row in ["Desktop, Documents and Downloads", "Notifications"] {
+            wait(element(labelContains: row), "row \(row)")
+        }
+        let rows = ["permission-protectedFolders", "permission-scanLocations", "permission-notifications"]
+        let visibleActions = rows.filter { app.descendants(matching: .any)[$0].firstMatch.exists }
+        XCTAssertFalse(visibleActions.isEmpty, "at least one permission can be granted from its row")
+        // Scan locations: the fixture folder is authorized, so that row needs nothing.
+        XCTAssertFalse(app.descendants(matching: .any)["permission-scanLocations"].firstMatch.exists,
+                       "an authorized folder counts as a scan location")
+
+        wait(app.descendants(matching: .any)["permissionsNotNow"].firstMatch, "Not Now").click()
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10), "Not Now closes the sheet")
+        // Reviewed once: no banner any more, but the Overview card still offers the sheet.
+        wait(text(containing: "System-reported capacity"), "overview")
+        XCTAssertFalse(app.descendants(matching: .any)["permissionsBanner"].firstMatch.exists, "banner is gone after review")
+        let review = wait(app.descendants(matching: .any)["reviewPermissions"].firstMatch, "Permissions… button")
+        assertInsideWindow(review, "Permissions… button on the Overview card")
+        review.click()
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10), "sheet reopens from the Overview card")
+        wait(app.descendants(matching: .any)["permissionsNotNow"].firstMatch, "close button").click()
+        XCTAssertTrue(sheet.waitForNonExistence(timeout: 10), "sheet closes again")
+    }
+
+    private func attachScreenshot(_ name: String) {
+        let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     func testSettingsMonitoringAndActivityExportMenu() throws {

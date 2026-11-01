@@ -47,6 +47,9 @@ final class AppModel {
 
     let access = AccessCoordinator()
     let settings = AppSettings()
+    let permissions = PermissionsModel()
+    /// The one-time permissions sheet; opened on first launch and from Settings or the Overview banner.
+    var showPermissions = false
 
     private(set) var store: Store?
     private(set) var startupError: String?
@@ -121,6 +124,10 @@ final class AppModel {
         await operations.reloadHistory()
         if let latest = latestScan(for: selectedLocation) { await show(scanID: latest.id) }
         startMonitoring()
+        await permissions.refresh()
+        if !settings.permissionsConsentShown && AppEnvironment.showsFirstLaunchPermissions {
+            showPermissions = true
+        }
     }
 
     // MARK: Volumes
@@ -196,6 +203,30 @@ final class AppModel {
         await selectLocation(location.id)
     }
 
+    /// Adds a typed folder path and selects it. Returns a message when the path cannot be used.
+    @discardableResult
+    func addLocation(path: String) async -> String? {
+        switch access.addPath(path) {
+        case .failure(let error):
+            return error.message
+        case .success(let location):
+            await audit(AuditEvent(operationId: nil, eventType: "access.granted", severity: .info,
+                                   message: "Folder access added: \(location.displayPath)"))
+            await selectLocation(location.id)
+            return nil
+        }
+    }
+
+    /// Selects the whole startup disk as the scan scope, adding it on first use.
+    @discardableResult
+    func selectWholeMac() async -> String? {
+        if let existing = access.locations.first(where: \.isWholeVolume) {
+            await selectLocation(existing.id)
+            return nil
+        }
+        return await addLocation(path: ScanConfiguration.wholeVolumeRoot)
+    }
+
     func removeLocation(_ location: AuthorizedLocation) async {
         access.remove(location)
         await audit(AuditEvent(operationId: nil, eventType: "access.removed", severity: .info,
@@ -229,9 +260,10 @@ final class AppModel {
         }
         defer { scoped.stop() }
 
+        // A whole-Mac scan must skip /System/Volumes, or the Data volume would be counted twice.
         var config = ScanConfiguration(
             rootPath: location.path,
-            exclusions: settings.exclusions,
+            exclusions: settings.exclusions + ScanConfiguration.implicitExclusions(forRoot: location.path),
             largeFileThresholdBytes: settings.largeFileThresholdBytes
         )
         config.crossMountPoints = settings.crossMountPoints

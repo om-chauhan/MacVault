@@ -47,57 +47,62 @@ struct ActivityView: View {
                 .disabled(model.store == nil)
                 .help(model.store == nil ? "The activity log is unavailable." : "Exports the whole activity log. Redacted exports replace your home folder and account name.")
             }
-            if let exportError {
-                InlineBanner(kind: .error, title: "Export failed", message: exportError, actionTitle: "Dismiss") { self.exportError = nil }
-                    .padding(.horizontal, Spacing.l)
-                    .padding(.bottom, Spacing.s)
-            }
-            Divider()
+            VStack(alignment: .leading, spacing: Spacing.s) {
+                if let exportError {
+                    InlineBanner(kind: .error, title: "Export failed", message: exportError, actionTitle: "Dismiss") { self.exportError = nil }
+                }
 
-            if model.store == nil {
-                EmptyState(title: "Activity log unavailable", symbol: "exclamationmark.triangle",
-                           message: model.startupError ?? "The local database could not be opened.")
-            } else if events.isEmpty {
-                EmptyState(title: search.isEmpty && minimumSeverity == nil ? "No activity yet" : "No matching activity",
-                           symbol: SidebarItem.activity.symbol,
-                           message: search.isEmpty && minimumSeverity == nil
-                               ? "Scans, access changes and data management actions are recorded here."
-                               : "Try another search or a lower severity.")
-            } else {
-                // Edge to edge: inside the split view's detail an HSplitView counts the sidebar twice
-                // (see ApplicationsView), so it has no horizontal page inset.
-                HSplitView {
-                    Table(events, selection: $selection, sortOrder: $sortOrder) {
-                        TableColumn("Time", value: \.createdAt) { e in
-                            // Compact; the full date is in the help and the detail pane.
-                            Text(e.createdAt.formatted(.dateTime.year(.twoDigits).month(.twoDigits).day(.twoDigits)
-                                .hour().minute().second()))
-                                .monospacedDigit().lineLimit(1)
-                                .help(e.createdAt.formatted(date: .complete, time: .standard))
+                if model.store == nil {
+                    EmptyState(title: "Activity log unavailable", symbol: "exclamationmark.triangle",
+                               message: model.startupError ?? "The local database could not be opened.")
+                } else if events.isEmpty {
+                    EmptyState(title: search.isEmpty && minimumSeverity == nil ? "No activity yet" : "No matching activity",
+                               symbol: SidebarItem.activity.symbol,
+                               message: search.isEmpty && minimumSeverity == nil
+                                   ? "Scans, access changes and data management actions are recorded here."
+                                   : "Try another search or a lower severity.")
+                } else {
+                    // The table takes the width; the selected event's detail is a fixed-width inspector card.
+                    HStack(alignment: .top, spacing: Spacing.m) {
+                        Card(flush: true) {
+                            Table(events, selection: $selection, sortOrder: $sortOrder) {
+                                TableColumn("Time", value: \.createdAt) { e in
+                                    // Compact (day and month, time to the second); the full date is in the
+                                    // help and the detail pane.
+                                    Text(e.createdAt.formatted(.dateTime.month(.twoDigits).day(.twoDigits).hour().minute().second()))
+                                        .monospacedDigit().lineLimit(1)
+                                        .help(e.createdAt.formatted(date: .complete, time: .standard))
+                                }
+                                // Ideal widths sum to what fits beside the inspector at the minimum window;
+                                // the message column takes the rest in wider windows. The event type is in
+                                // the detail (and searchable), not a column.
+                                .width(min: 110, ideal: 124, max: 200)
+                                TableColumn("Severity", value: \.severity.rawValue) { e in
+                                    HStack(spacing: Spacing.xxs) { SeverityIcon(severity: e.severity); Text(e.severity.rawValue.capitalized) }
+                                }
+                                .width(min: 70, ideal: 78, max: 110)
+                                TableColumn("Message", value: \.message) { e in
+                                    Text(e.message).lineLimit(1).truncationMode(.middle).help("\(e.message)\n\(e.eventType)")
+                                }
+                                .width(min: 80, ideal: 90)
+                            }
+                            .alternatingRowBackgrounds(.disabled)
+                            .scrollContentBackground(.hidden)
                         }
-                        .width(min: 150, ideal: 160, max: 200)
-                        TableColumn("Severity", value: \.severity.rawValue) { e in
-                            HStack(spacing: Spacing.xxs) { SeverityIcon(severity: e.severity); Text(e.severity.rawValue.capitalized) }
-                        }
-                        .width(min: 80, ideal: 92, max: 110)
-                        TableColumn("Message", value: \.message) { e in
-                            Text(e.message).lineLimit(1).truncationMode(.middle).help(e.message)
-                        }
-                        .width(min: 120, ideal: 420)
-                        TableColumn("Event", value: \.eventType) { e in
-                            Text(e.eventType).font(.smallPath).foregroundStyle(.secondary).lineLimit(1).help(e.eventType)
-                        }
-                        .width(min: 110, ideal: 160, max: 220)
+                        .environment(\.cardFillsHeight, true)
+
+                        EventDetail(event: selected)
+                            .frame(width: Dimensions.inspectorWidth)
+                            .frame(maxHeight: .infinity)
+                            .clipShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+                            .cardSurface()
                     }
-                    .alternatingRowBackgrounds(.disabled)
-                    // On the canvas, like the detail pane beside it.
-                    .scrollContentBackground(.hidden)
-                    .frame(minWidth: 240, idealWidth: 720, maxWidth: .infinity)
-
-                    EventDetail(event: selected)
-                        .frame(minWidth: 150, idealWidth: 300, maxWidth: 320)
+                    .frame(maxHeight: .infinity)
                 }
             }
+            .padding(.horizontal, Spacing.l)
+            .padding(.bottom, Spacing.m)
+            .frame(maxHeight: .infinity, alignment: .top)
         }
         .navigationTitle("Activity")
         .onChange(of: minimumSeverity) { _, _ in reload() }

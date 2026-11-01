@@ -36,6 +36,13 @@ targets:
         LSApplicationCategoryType: public.app-category.utilities
         LSMinimumSystemVersion: "14.0"
         NSHumanReadableCopyright: ""
+        # Shown in the macOS dialogs the permissions sheet triggers. Reading only; nothing is changed.
+        NSDesktopFolderUsageDescription: "MacVault measures what uses space on your Desktop. It only reads; nothing is moved or deleted without your approval."
+        NSDocumentsFolderUsageDescription: "MacVault measures what uses space in Documents. It only reads; nothing is moved or deleted without your approval."
+        NSDownloadsFolderUsageDescription: "MacVault measures what uses space in Downloads. It only reads; nothing is moved or deleted without your approval."
+        NSRemovableVolumesUsageDescription: "MacVault measures external disks you choose to scan. It only reads them."
+        NSNetworkVolumesUsageDescription: "MacVault measures network volumes you choose to scan. It only reads them."
+        NSFileProviderDomainUsageDescription: "MacVault measures cloud-synced folders you choose to scan. It only reads them."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.macvault.app

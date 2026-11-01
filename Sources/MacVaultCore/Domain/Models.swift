@@ -78,6 +78,20 @@ public struct ScanConfiguration: Sendable, Equatable {
     public func isExcluded(_ path: String) -> Bool {
         exclusions.contains { PathUtilities.path(path, isWithin: $0) }
     }
+
+    /// Root path that means "the whole startup disk".
+    public static let wholeVolumeRoot = "/"
+
+    /// Exclusions a scan of `root` needs to stay correct, independent of user settings.
+    ///
+    /// On macOS the startup disk is a volume group: `/` is the sealed System volume and user data lives
+    /// on the Data volume, mounted at `/System/Volumes/Data` and firmlinked into `/Users`, `/Applications`,
+    /// `/Library`, … The kernel reports the same device for both, so a scan of `/` would otherwise count
+    /// everything twice (once through the firmlinks, once under `/System/Volumes/Data`). The other mounts
+    /// under `/System/Volumes` (Preboot, VM, Update, …) are also reached through their firmlinks.
+    public static func implicitExclusions(forRoot root: String) -> [String] {
+        PathUtilities.canonicalize(root) == wholeVolumeRoot ? ["/System/Volumes"] : []
+    }
 }
 
 // MARK: - Progress

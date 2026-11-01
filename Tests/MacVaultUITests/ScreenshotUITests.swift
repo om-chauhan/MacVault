@@ -52,6 +52,17 @@ final class ScreenshotUITests: XCTestCase {
         open("Storage Analyzer")
         wait(app.buttons["scanButton"], "scan button")
         capture("analyzer-not-scanned")
+        // Path entry sheet (Enter Path… in the scope menu), then cancelled.
+        app.descendants(matching: .any)["scopeMenu"].firstMatch.click()
+        let enterPath = app.menuItems["Enter Path…"]
+        if enterPath.waitForExistence(timeout: 5) {
+            enterPath.click()
+            wait(app.descendants(matching: .any)["pathField"], "path field")
+            capture("analyzer-path-entry-sheet", over: [app.sheets.firstMatch])
+            app.sheets.firstMatch.buttons["Cancel"].click()
+        } else {
+            app.typeKey(.escape, modifierFlags: [])
+        }
         app.buttons["scanButton"].click()
         wait(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Scan in progress")).firstMatch,
              "scan progress", timeout: 10)
@@ -167,7 +178,8 @@ final class ScreenshotUITests: XCTestCase {
         // The form's scroll view (not the sidebar's): the one holding the schedule picker.
         let form = app.scrollViews.containing(.popUpButton, identifier: "schedulePicker").firstMatch
         if form.exists {
-            form.scroll(byDeltaX: 0, deltaY: -3000)
+            // Scroll from a point near the form's top edge: its centre can be covered by a control.
+            form.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)).scroll(byDeltaX: 0, deltaY: -3000)
             capture("settings-bottom")
         }
 
@@ -265,16 +277,12 @@ final class ScreenshotUITests: XCTestCase {
         try? FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: path)
     }
 
-    /// The widest sidebar and the app list's divider dragged as far right as it goes.
+    /// The widest sidebar (the app detail is a fixed-width inspector card, so this is the narrowest
+    /// layout of the app list).
     private func dragApplicationsToNarrowest() {
-        let window = app.windows.firstMatch
-        func splitters() -> [XCUIElement] {
-            (0..<app.splitters.count).map { app.splitters.element(boundBy: $0) }.sorted { $0.frame.minX < $1.frame.minX }
-        }
-        guard splitters().count == 2 else { return }
-        for (index, distance) in [(0, CGFloat(60)), (1, window.frame.maxX - 10 - splitters()[1].frame.midX)] {
-            let handle = splitters()[index].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            handle.click(forDuration: 0.3, thenDragTo: handle.withOffset(CGVector(dx: distance, dy: 0)))
-        }
+        let splitters = (0..<app.splitters.count).map { app.splitters.element(boundBy: $0) }.sorted { $0.frame.minX < $1.frame.minX }
+        guard let sidebar = splitters.first else { return }
+        let handle = sidebar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        handle.click(forDuration: 0.3, thenDragTo: handle.withOffset(CGVector(dx: 60, dy: 0)))
     }
 }

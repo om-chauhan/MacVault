@@ -88,6 +88,29 @@ final class ActivityExporterTests: XCTestCase {
     }
 }
 
+final class WholeVolumeScanConfigurationTests: XCTestCase {
+    func testWholeVolumeScanSkipsTheVolumeGroupMounts() {
+        let implicit = ScanConfiguration.implicitExclusions(forRoot: "/")
+        XCTAssertEqual(implicit, ["/System/Volumes"])
+        // Trailing slashes and "." still mean the root.
+        XCTAssertEqual(ScanConfiguration.implicitExclusions(forRoot: "//"), implicit)
+        XCTAssertEqual(ScanConfiguration.implicitExclusions(forRoot: "/."), implicit)
+
+        let config = ScanConfiguration(rootPath: "/", exclusions: ["/Users/Shared/x"] + implicit)
+        XCTAssertTrue(config.isExcluded("/System/Volumes"))
+        XCTAssertTrue(config.isExcluded("/System/Volumes/Data/Users"))
+        XCTAssertFalse(config.isExcluded("/System/Library"))
+        XCTAssertFalse(config.isExcluded("/Users"))
+        XCTAssertTrue(config.isExcluded("/Users/Shared/x"), "user exclusions are kept alongside the implicit ones")
+    }
+
+    func testFolderScansGetNoImplicitExclusions() {
+        XCTAssertEqual(ScanConfiguration.implicitExclusions(forRoot: "/Users"), [])
+        XCTAssertEqual(ScanConfiguration.implicitExclusions(forRoot: "/System"), [])
+        XCTAssertEqual(ScanConfiguration.implicitExclusions(forRoot: NSHomeDirectory()), [])
+    }
+}
+
 final class MonitoringTests: XCTestCase {
     func testScheduleDue() {
         let now = Date()

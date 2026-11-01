@@ -178,25 +178,15 @@ struct ApprovalSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.m) {
-            HStack(alignment: .center, spacing: Spacing.s) {
-                Image(systemName: "trash.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: Dimensions.headerIcon, height: Dimensions.headerIcon)
-                    .background(Palette.error.gradient, in: RoundedRectangle(cornerRadius: Radius.small + 2, style: .continuous))
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Move \(manifest.items.count) item\(manifest.items.count == 1 ? "" : "s") to the Trash?")
-                        .font(.pageTitle)
-                    Text(manifest.title).font(.callout).foregroundStyle(.secondary)
-                }
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("approvalTitle")
+            SheetHeader(title: "Move \(manifest.items.count) item\(manifest.items.count == 1 ? "" : "s") to the Trash?",
+                        subtitle: manifest.title, symbol: "trash.fill", tint: Palette.error)
+                .accessibilityIdentifier("approvalTitle")
 
             HStack(alignment: .top, spacing: Spacing.l) {
-                Metric(label: "Measured size", value: ByteFormat.string(manifest.estimatedBytes), size: .tile)
-                Metric(label: "Items", value: manifest.items.count.formatted(), size: .tile)
+                MetricGrid(items: [
+                    MetricItem("Measured size", value: ByteFormat.string(manifest.estimatedBytes)),
+                    MetricItem("Items", value: manifest.items.count.formatted()),
+                ])
                 Spacer(minLength: 0)
                 VStack(alignment: .trailing, spacing: Spacing.xxs) {
                     if highRisk > 0 { StatusBadge(text: "\(highRisk) high risk", symbol: "exclamationmark.triangle.fill", tint: Palette.error) }
@@ -215,7 +205,9 @@ struct ApprovalSheet: View {
                             .help(item.originalPath)
                         Spacer(minLength: Spacing.xs)
                         Text(ByteFormat.string(item.expectedSizeBytes)).font(.rowValue).monospacedDigit()
+                            .frame(minWidth: Dimensions.rowValueWidth, alignment: .trailing)
                         StatusBadge(risk: item.riskLevel)
+                            .frame(minWidth: Dimensions.rowActionWidth, alignment: .trailing)
                     }
                     Text(item.reason).font(.caption).foregroundStyle(.secondary)
                 }

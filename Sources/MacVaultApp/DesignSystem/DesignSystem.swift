@@ -38,6 +38,11 @@ enum Dimensions {
     /// Lists that grow with use (history, problems, issues) scroll beyond this height.
     static let boundedListHeight: CGFloat = 160
     static let sheetWidth: CGFloat = 640
+    /// Action column of the permissions sheet ("System Settings…" fits untruncated).
+    static let permissionActionWidth: CGFloat = 136
+    /// App icons: list rows and the detail header.
+    static let appIconSmall: CGFloat = 20
+    static let appIconLarge: CGFloat = 48
     /// Settings form width at most: the grouped form's ~700 pt column plus its own insets, so its
     /// sections line up with the screen header instead of floating in the middle.
     static let formWidth: CGFloat = 740
@@ -55,6 +60,12 @@ enum Dimensions {
     static let barLabelWidth: CGFloat = 128
     /// Search fields in screen headers.
     static let searchFieldWidth: CGFloat = 180
+    /// Detail pane beside a table (Applications, Activity).
+    static let inspectorWidth: CGFloat = 288
+    /// Trailing action column of list rows (button or badge), so dates beside it line up.
+    static let rowActionWidth: CGFloat = 96
+    /// Size column at the end of list rows and their section headers.
+    static let rowValueWidth: CGFloat = 72
 }
 
 enum Motion {
@@ -222,29 +233,38 @@ struct Card<Content: View>: View {
     let info: String?
     let style: CardStyle
     let trailing: AnyView?
+    /// Flush content (a list or table) runs to the card's edges; only the header keeps the inset.
+    let flush: Bool
     @ViewBuilder let content: Content
     @Environment(\.cardFillsHeight) private var fillsHeight
 
     init(_ title: String? = nil, symbol: String? = nil, tint: Color = .accentColor, info: String? = nil,
-         style: CardStyle = .plain, trailing: AnyView? = nil, @ViewBuilder content: () -> Content) {
+         style: CardStyle = .plain, trailing: AnyView? = nil, flush: Bool = false, @ViewBuilder content: () -> Content) {
         self.title = title
         self.symbol = symbol
         self.tint = tint
         self.info = info
         self.style = style
         self.trailing = trailing
+        self.flush = flush
         self.content = content()
     }
 
     var body: some View {
-        let stack = VStack(alignment: .leading, spacing: Spacing.s) {
-            if title != nil || trailing != nil {
+        let hasHeader = title != nil || trailing != nil
+        let stack = VStack(alignment: .leading, spacing: flush ? Spacing.xs : Spacing.s) {
+            if hasHeader {
                 CardHeader(title: title ?? "", symbol: symbol, tint: style == .bold ? .white : tint, info: info) { trailing }
+                    .padding(.horizontal, Spacing.m)
+                    .padding(.top, Spacing.m)
             }
             content
+                .padding(.horizontal, flush ? 0 : Spacing.m)
+                .padding(.top, hasHeader || flush ? 0 : Spacing.m)
+                .padding(.bottom, flush ? 0 : Spacing.m)
         }
-        .padding(Spacing.m)
         .frame(maxWidth: .infinity, maxHeight: fillsHeight ? .infinity : nil, alignment: .topLeading)
+        .clipShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
         Group {
             switch style {
             case .plain:
@@ -419,6 +439,32 @@ struct ScreenHeader<Trailing: View>: View {
     }
 }
 
+/// The first row of every sheet: tinted icon square, title and one line of context, like `ScreenHeader`.
+struct SheetHeader: View {
+    let title: String
+    var subtitle: String? = nil
+    let symbol: String
+    var tint: Color = .accentColor
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Spacing.s) {
+            Image(systemName: symbol)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: Dimensions.headerIcon, height: Dimensions.headerIcon)
+                .background(tint.gradient, in: RoundedRectangle(cornerRadius: Radius.small + 2, style: .continuous))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title).font(.pageTitle).lineLimit(2).accessibilityAddTraits(.isHeader)
+                if let subtitle {
+                    Text(subtitle).font(.callout).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).help(subtitle)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 // MARK: - Numbers
 
 /// A measured value with its unit smaller and secondary ("412 GB"). Unknown values read "Unknown".
@@ -481,6 +527,83 @@ struct Metric: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(label): \(value)\(caption.map { ", \($0)" } ?? "")")
+    }
+}
+
+/// One column of a `MetricGrid`.
+struct MetricItem: Identifiable {
+    let id: String
+    let label: String
+    let value: String
+    var caption: String? = nil
+    var size: ValueText.Size = .tile
+
+    init(_ label: String, value: String, caption: String? = nil, size: ValueText.Size = .tile) {
+        id = label
+        self.label = label
+        self.value = value
+        self.caption = caption
+        self.size = size
+    }
+}
+
+/// Metrics side by side with their labels on one line, their numbers on one baseline (even when the
+/// first is a hero and the rest are tiles) and their captions on one line, as in ref. 01.
+struct MetricGrid: View {
+    let items: [MetricItem]
+    var spacing: CGFloat = Spacing.l
+
+    var body: some View {
+        let hasCaptions = items.contains { $0.caption != nil }
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: spacing, verticalSpacing: Spacing.xxs / 2) {
+            GridRow {
+                ForEach(items) { item in
+                    Text(item.label).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            GridRow {
+                ForEach(items) { item in
+                    ValueText(value: item.value, size: item.size)
+                }
+            }
+            if hasCaptions {
+                GridRow {
+                    ForEach(items) { item in
+                        Text(item.caption ?? "").font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(items.map { "\($0.label): \($0.value)\($0.caption.map { ", \($0)" } ?? "")" }.joined(separator: ". "))
+    }
+}
+
+/// Header of a list section: title, optional risk/status badge, then the actions and the section's
+/// size at the trailing edge, so the size shares its right edge with the sizes of the rows below.
+struct ListSectionHeader<Actions: View>: View {
+    let title: String
+    var badge: StatusBadge? = nil
+    var value: String? = nil
+    @ViewBuilder var actions: Actions
+
+    var body: some View {
+        HStack(spacing: Spacing.xs) {
+            Text(title).font(.cardTitle).foregroundStyle(.primary).lineLimit(1)
+            if let badge { badge }
+            Spacer(minLength: Spacing.s)
+            actions
+            if let value {
+                Text(value).font(.rowValue).monospacedDigit().foregroundStyle(.primary)
+                    .frame(minWidth: Dimensions.rowValueWidth, alignment: .trailing)
+            }
+        }
+    }
+}
+
+extension ListSectionHeader where Actions == EmptyView {
+    init(title: String, badge: StatusBadge? = nil, value: String? = nil) {
+        self.init(title: title, badge: badge, value: value) { EmptyView() }
     }
 }
 

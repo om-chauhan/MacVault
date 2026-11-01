@@ -39,6 +39,8 @@ Last verified: 2026-10-30, milestone 2 (all planned phases). Verification enviro
 |---|---|---|
 | Overview, Storage Analyzer, Activity, Settings | **Partial** | Compiled and launched |
 | Analyzer drill-down list and treemap with breadcrumbs | **Partial** | Compiled |
+| Permissions sheet: first-launch consent that lists Full Disk Access, Desktop/Documents/Downloads, scan scope and notifications with probed status and one “Allow All” | **Partial** | Compiled; UI test covers open, rows, Not Now and reopening. Full Disk Access can only be granted in System Settings (opened for the user); its state is probed by listing a protected folder |
+| Analyzer scope: Whole Mac (startup disk), chosen folder, or typed path | **Partial** | Compiled. Whole-Mac scan of `/` skips `/System/Volumes` so the Data volume is not counted twice; verified with a real read-only scan of this Mac (3.4M files, status Partial because of TCC-protected folders) |
 | Activity export menu (save panel) | **Partial** | Compiled |
 | Cleaner, Developer Tools, Applications, Duplicates screens | **Partial** | Compiled. Shared approval sheet; high-risk items need an explicit acknowledgement |
 | In-use checks before moving (running app, Xcode/Simulator for their caches) | **Partial** | Compiled; uses `NSRunningApplication` |

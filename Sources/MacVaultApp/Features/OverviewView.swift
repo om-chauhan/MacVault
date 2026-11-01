@@ -51,6 +51,14 @@ struct OverviewView: View {
         if let error = model.startupError {
             InlineBanner(kind: .error, title: "Local database unavailable", message: error)
         }
+        // Until the user has reviewed permissions once; afterwards the Folder Access card shows the state.
+        if !model.settings.permissionsConsentShown,
+           model.permissions.accessNeedsAttention(hasScanLocations: !model.access.locations.isEmpty) {
+            InlineBanner(kind: .info, title: "Allow MacVault to read your Mac",
+                         message: "Grant every permission once, with one consent, instead of answering macOS dialogs one by one during a scan. MacVault only reads; nothing is moved or deleted without your approval.",
+                         actionTitle: "Review Permissions…") { model.showPermissions = true }
+                .accessibilityIdentifier("permissionsBanner")
+        }
         if model.reconciledOnLaunch.interruptedScans > 0 {
             InlineBanner(kind: .warning,
                          title: "\(model.reconciledOnLaunch.interruptedScans) scan(s) were interrupted",
@@ -121,34 +129,16 @@ struct VolumeCapacityCard: View {
         Card(volume.displayName, symbol: volume.isInternal == false || volume.isRemovable == true ? "externaldrive.fill" : "internaldrive.fill",
              tint: Palette.storage, info: info, trailing: AnyView(actions)) {
             if let used = volume.usedBytes, let total = volume.totalBytes, let available = volume.availableBytes, total > 0 {
+                // Ring, hero and legend in one row (ref. 01). The legend is a fixed column at the
+                // trailing edge, so its values keep one right edge and do not drift from their labels
+                // in wide windows; the hero takes the width in between (at least 240 pt at the
+                // minimum window, since this card spans the full width there).
                 HStack(alignment: .center, spacing: Spacing.l) {
-                    RingChart(segments: [
-                        ChartSegment(id: "used", label: "Used", bytes: used, color: Palette.storage),
-                        ChartSegment(id: "available", label: "Available", bytes: available, color: Palette.neutral),
-                    ]) {
-                        VStack(spacing: 0) {
-                            Text(LegendRow.percent(Double(used) / Double(total)))
-                                .font(.tileNumber).monospacedDigit()
-                            Text("used").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(width: Dimensions.capacityRing, height: Dimensions.capacityRing)
-
-                    VStack(alignment: .leading, spacing: Spacing.xs) {
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text("Available").font(.callout).foregroundStyle(.secondary)
-                            ValueText(value: bytes(available), size: .hero)
-                        }
-                        if let delta = WeekChange(history: history, current: available) {
-                            DeltaPill(delta: delta.bytes, caption: "since \(delta.since.formatted(.dateTime.month(.abbreviated).day()))")
-                        }
-                        VStack(spacing: Spacing.xxs) {
-                            LegendRow(color: Palette.storage, label: "Used", value: bytes(used), share: Double(used) / Double(total))
-                            LegendRow(color: Palette.neutral, label: "Available", value: bytes(available), share: Double(available) / Double(total))
-                        }
-                        Text(capacityLine(total: total, available: available))
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
+                    ring(used: used, total: total, available: available)
+                    hero(available: available, total: total)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    legend(used: used, total: total, available: available)
+                        .frame(width: Dimensions.summaryTotalsWidth)
                 }
             } else {
                 CardEmptyState(title: "Capacity unknown", message: "This volume does not report its capacity.")
@@ -157,12 +147,51 @@ struct VolumeCapacityCard: View {
         .accessibilityLabel("Capacity of \(volume.displayName)")
     }
 
-    private func capacityLine(total: Int64, available: Int64) -> String {
-        var parts = ["Capacity \(bytes(total))"]
+    private func ring(used: Int64, total: Int64, available: Int64) -> some View {
+        RingChart(segments: [
+            ChartSegment(id: "used", label: "Used", bytes: used, color: Palette.storage),
+            ChartSegment(id: "available", label: "Available", bytes: available, color: Palette.neutral),
+        ]) {
+            VStack(spacing: 0) {
+                Text(LegendRow.percent(Double(used) / Double(total)))
+                    .font(.tileNumber).monospacedDigit()
+                Text("used").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: Dimensions.capacityRing, height: Dimensions.capacityRing)
+    }
+
+    private func hero(available: Int64, total: Int64) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Available").font(.callout).foregroundStyle(.secondary)
+                ValueText(value: bytes(available), size: .hero)
+            }
+            if let delta = WeekChange(history: history, current: available) {
+                DeltaPill(delta: delta.bytes, caption: "since \(delta.since.formatted(.dateTime.month(.abbreviated).day()))")
+            }
+            Text(capacityNote(available: available))
+                .font(.caption).foregroundStyle(.secondary).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func legend(used: Int64, total: Int64, available: Int64) -> some View {
+        VStack(spacing: Spacing.xs) {
+            LegendRow(color: Palette.storage, label: "Used", value: bytes(used), share: Double(used) / Double(total))
+            LegendRow(color: Palette.neutral, label: "Available", value: bytes(available), share: Double(available) / Double(total))
+            Divider()
+            LegendRow(color: .clear, label: "Capacity", value: bytes(total))
+        }
+    }
+
+    /// What is not in the legend: purgeable space and the volume format.
+    private func capacityNote(available: Int64) -> String {
+        var parts: [String] = []
         if let important = volume.availableForImportantUsageBytes, important != available {
             parts.append("\(bytes(important)) incl. purgeable")
         }
         if let format = volume.formatDescription { parts.append(format) }
+        parts.append("observed \(volume.observedAt.relative)")
         return parts.joined(separator: " · ")
     }
 
@@ -494,9 +523,14 @@ struct AccessCoverageCard: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        Card("Folder Access", symbol: "lock.shield.fill", tint: Palette.analyzer,
-             info: "Full Disk Access is not assumed. Protected locations that cannot be read are counted and shown after each scan.",
-             trailing: AnyView(OpenScreenButton(item: .settings))) {
+        Card("Access & Permissions", symbol: "lock.shield.fill", tint: Palette.analyzer,
+             info: "What macOS currently lets MacVault read. Full Disk Access is not assumed: protected locations that cannot be read are counted and shown after each scan.",
+             trailing: AnyView(Button("Permissions…") { model.showPermissions = true }
+                .controlSize(.small)
+                .help("Review and grant every permission in one place")
+                .accessibilityIdentifier("reviewPermissions"))) {
+            permissionRows
+            Divider()
             if model.access.locations.isEmpty {
                 CardEmptyState(title: "No folders yet", message: "MacVault can only measure what it is allowed to read.")
             } else {
@@ -516,6 +550,26 @@ struct AccessCoverageCard: View {
                         if location.id != model.access.locations.last?.id { Divider() }
                     }
                 }
+            }
+        }
+    }
+
+    /// System permissions, as probed (never assumed), on one line each like the folder rows below.
+    private var permissionRows: some View {
+        let permissions = model.permissions
+        let rows: [(String, String, PermissionStatus)] = (PermissionsModel.supportsFullDiskAccess
+            ? [("Full Disk Access", "internaldrive.fill", permissions.fullDiskAccess)] : [])
+            + [("Desktop, Documents, Downloads", "folder.fill", permissions.protectedFolders),
+               ("Notifications", "bell.badge.fill", permissions.notifications)]
+        return VStack(spacing: Spacing.xs) {
+            ForEach(rows, id: \.0) { title, symbol, status in
+                HStack(spacing: Spacing.xs) {
+                    Image(systemName: symbol).foregroundStyle(Palette.analyzer).frame(width: Spacing.l).accessibilityHidden(true)
+                    Text(title).font(.callout)
+                    Spacer(minLength: Spacing.xs)
+                    PermissionBadge(status: status)
+                }
+                .accessibilityElement(children: .combine)
             }
         }
     }
