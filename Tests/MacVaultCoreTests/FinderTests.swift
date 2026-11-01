@@ -81,6 +81,71 @@ final class CleanupCandidateFinderTests: XCTestCase {
         XCTAssertFalse(findings.candidates.first?.selectedByDefault ?? true)
     }
 
+    func testInstallerRuleOffersOnlyOldInstallerFiles() async throws {
+        let t = try TempTree()
+        let policy = try t.policy()
+        try t.file("home/Downloads/Old.dmg", bytes: 5_000)
+        try t.setModified("home/Downloads/Old.dmg", daysAgo: 45)
+        try t.file("home/Downloads/Setup.PKG", bytes: 2_000)                     // extension case-insensitive
+        try t.setModified("home/Downloads/Setup.PKG", daysAgo: 45)
+        try t.file("home/Downloads/Fresh.dmg", bytes: 1_000)                     // downloaded today
+        try t.file("home/Downloads/notes.txt", bytes: 100)                       // not an installer
+        try t.setModified("home/Downloads/notes.txt", daysAgo: 45)
+        try t.file("home/Downloads/Movies.dmg/part", bytes: 100)                 // a folder, not a file
+        try t.setModified("home/Downloads/Movies.dmg", daysAgo: 45)
+
+        let findings = try CleanupCandidateFinder(home: t.home, policy: policy).evaluate(RuleCatalog.installersInDownloads)
+        XCTAssertEqual(findings.candidates.map(\.name), ["Old.dmg", "Setup.PKG"])
+        XCTAssertEqual(findings.tooRecentCount, 1)
+        XCTAssertEqual(findings.candidates.first?.riskLevel, .medium)
+        XCTAssertFalse(findings.candidates.first?.selectedByDefault ?? true, "installers are never pre-selected")
+    }
+
+    func testLeftoverRulesOfferOnlyBundleIdentifiersOfUninstalledApps() async throws {
+        let t = try TempTree()
+        let policy = try t.policy()
+        let folders = ["com.example.gone", "com.example.here", "com.example.here.Widgets", "com.suite.Word", "Slack",
+                       "com.apple.TCC", "com.example.recent"]
+        for name in folders {
+            try t.file("home/Library/Application Support/\(name)/data.db", bytes: 100)
+            try t.setModified("home/Library/Application Support/\(name)/data.db", daysAgo: name == "com.example.recent" ? 2 : 60)
+            try t.setModified("home/Library/Application Support/\(name)", daysAgo: name == "com.example.recent" ? 2 : 60)
+        }
+        for name in ["org.other.gone", "com.example.gone", "com.example.here", "com.suite.shared"] {
+            try t.file("home/Library/Preferences/\(name).plist", bytes: 50)
+            try t.setModified("home/Library/Preferences/\(name).plist", daysAgo: 60)
+        }
+
+        // Launch Services knows "here"; the Applications folders hold "here" and a Suite app (Excel-like) but not Word.
+        let installed: @Sendable (String) -> Bool = { $0 == "com.example.here" }
+        let finder = CleanupCandidateFinder(home: t.home, policy: policy, isInstalled: installed,
+                                            installedBundleIdentifiers: ["com.example.here", "com.suite.Excel"])
+        let support = try finder.evaluate(RuleCatalog.orphanedApplicationSupport)
+        XCTAssertEqual(support.candidates.map(\.name).sorted(), ["com.example.gone", "com.suite.Word"],
+                       "installed apps, their extensions, recent, Apple and non-identifier names are left alone; another vendor app does not protect a folder")
+        XCTAssertEqual(support.tooRecentCount, 1)
+        XCTAssertFalse(support.candidates.first?.selectedByDefault ?? true)
+
+        let preferences = try finder.evaluate(RuleCatalog.orphanedPreferences)
+        XCTAssertEqual(preferences.candidates.map(\.name), ["org.other.gone.plist"],
+                       "the owner is the file name without .plist, and a vendor with an installed app keeps its shared files")
+
+        // Without an installed-app lookup the rule must not guess.
+        let blind = try CleanupCandidateFinder(home: t.home, policy: policy).evaluate(RuleCatalog.orphanedContainers)
+        XCTAssertTrue(blind.candidates.isEmpty)
+        XCTAssertNotNil(blind.locationError)
+    }
+
+    func testBundleIdentifierHeuristic() {
+        XCTAssertTrue(CleanupRule.looksLikeBundleIdentifier("com.example.app"))
+        XCTAssertTrue(CleanupRule.looksLikeBundleIdentifier("org.mozilla.firefox.helper"))
+        XCTAssertFalse(CleanupRule.looksLikeBundleIdentifier("Slack"))
+        XCTAssertFalse(CleanupRule.looksLikeBundleIdentifier("Google Chrome"))
+        XCTAssertFalse(CleanupRule.looksLikeBundleIdentifier("com.apple.Safari"))
+        XCTAssertFalse(CleanupRule.looksLikeBundleIdentifier("a..b"))
+        XCTAssertFalse(CleanupRule.looksLikeBundleIdentifier("my.notes"))
+    }
+
     func testFinderNeverModifiesAnything() async throws {
         let t = try TempTree()
         let policy = try t.policy()

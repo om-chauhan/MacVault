@@ -38,14 +38,40 @@ public struct CleanupCandidateFinder: Sendable {
     public let policy: SafetyPolicy
     public let probe: FileSystemProbe
     public let now: @Sendable () -> Date
+    /// Whether an app with this bundle identifier is installed (or running). Needed by rules that
+    /// offer leftovers of uninstalled apps; without it those rules offer nothing.
+    public let isInstalled: (@Sendable (String) -> Bool)?
+    /// Bundle identifiers of the apps installed in the Applications folders, for the vendor check
+    /// on preference files (a shared "com.vendor.suite" file belongs to whichever vendor app is installed).
+    public let installedBundleIdentifiers: Set<String>
 
     public init(home: String = NSHomeDirectory(), policy: SafetyPolicy? = nil, probe: FileSystemProbe = .posix,
-                now: @escaping @Sendable () -> Date = { Date() }) {
+                now: @escaping @Sendable () -> Date = { Date() }, isInstalled: (@Sendable (String) -> Bool)? = nil,
+                installedBundleIdentifiers: Set<String> = []) {
         let canonicalHome = PathUtilities.canonicalize(home)
         self.home = canonicalHome
         self.policy = policy ?? SafetyPolicy(home: canonicalHome)
         self.probe = probe
         self.now = now
+        self.isInstalled = isInstalled
+        self.installedBundleIdentifiers = installedBundleIdentifiers
+    }
+
+    /// An owner counts as installed when it, or the app it extends, is installed: "com.vendor.app.Widgets"
+    /// belongs to "com.vendor.app". For shared files (`vendorWide`), any installed app of the same vendor
+    /// ("com.vendor.*") counts, because "com.vendor.suite" preferences are shared by the suite's apps.
+    func ownerIsInstalled(_ owner: String, vendorWide: Bool) -> Bool {
+        guard let isInstalled else { return true }
+        let parts = owner.split(separator: ".").map(String.init)
+        for count in stride(from: parts.count, through: 3, by: -1) {
+            let candidate = parts.prefix(count).joined(separator: ".")
+            if installedBundleIdentifiers.contains(candidate) || isInstalled(candidate) { return true }
+        }
+        if vendorWide, parts.count >= 2 {
+            let vendor = parts.prefix(2).joined(separator: ".") + "."
+            if installedBundleIdentifiers.contains(where: { $0.hasPrefix(vendor) }) { return true }
+        }
+        return false
     }
 
     public func evaluate(_ rules: [CleanupRule],
@@ -60,6 +86,10 @@ public struct CleanupCandidateFinder: Sendable {
     }
 
     public func evaluate(_ rule: CleanupRule) throws -> RuleFindings {
+        if rule.onlyOrphanedOwners && isInstalled == nil {
+            return RuleFindings(rule: rule, candidates: [], locationMissing: false,
+                                locationError: "Installed applications could not be determined", protectedCount: 0, tooRecentCount: 0)
+        }
         let measurer = ItemMeasurer(probe: probe)
         let scopeRoot: String
         var paths: [String] = []
@@ -104,6 +134,20 @@ public struct CleanupCandidateFinder: Sendable {
             }
             guard case .success(let st) = probe.stat(path), st.kind == .directory || st.kind == .regular else {
                 continue // symlinks and special files are never offered
+            }
+            if let extensions = rule.includedExtensions {
+                // Files of the listed kinds only; anything else in the folder is simply not this rule's business.
+                guard st.kind == .regular, extensions.contains((name as NSString).pathExtension.lowercased()) else { continue }
+            }
+            if rule.onlyOrphanedOwners {
+                // Only names that are clearly an app's bundle identifier are judged; "Slack" or "Adobe" are left alone.
+                let isFile = rule.includedExtensions != nil
+                let owner = isFile ? (name as NSString).deletingPathExtension : name
+                guard CleanupRule.looksLikeBundleIdentifier(owner) else { continue }
+                if ownerIsInstalled(owner, vendorWide: isFile) {
+                    protectedCount += 1
+                    continue
+                }
             }
             let measured: ItemMeasurement
             do { measured = try measurer.measure(path) }

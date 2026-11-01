@@ -40,6 +40,9 @@ Last verified: 2026-10-30, milestone 2 (all planned phases). Verification enviro
 | Overview, Storage Analyzer, Activity, Settings | **Partial** | Compiled and launched |
 | Analyzer drill-down list and treemap with breadcrumbs | **Partial** | Compiled |
 | Permissions sheet: first-launch consent that lists Full Disk Access, Desktop/Documents/Downloads, scan scope and notifications with probed status and one “Allow All” | **Partial** | Compiled; UI test covers open, rows, Not Now and reopening. Full Disk Access can only be granted in System Settings (opened for the user); its state is probed by listing a protected folder |
+| Cleaner depth (rules 2026.11.1): Mail attachment copies, saved window state, installers in Downloads and on the Desktop, and leftovers of uninstalled apps (Application Support, Containers, Preferences; owner checked with Launch Services, 30-day age, never pre-selected) | **Partial** | Core tests cover the extension filter, the leftover owner check and the bundle-identifier heuristic; evaluated read-only against a real home folder |
+| Developer caches: Cargo registry, Go module cache, pnpm store, Maven repository added | **Partial** | Compiled; same rule engine and tests as the existing rules |
+| Start screens for Cleaner, Developer Tools (caches and projects), Applications and Duplicates: one primary button, “What it looks for” from the rule catalog with risk badges, “Never touched” facts; no review footer before results | **Partial** | Compiled; screenshot pass at 960×620 and 1600×1000, light and dark |
 | Analyzer scope: Whole Mac (startup disk), chosen folder, or typed path | **Partial** | Compiled. Whole-Mac scan of `/` skips `/System/Volumes` so the Data volume is not counted twice; verified with a real read-only scan of this Mac (3.4M files, status Partial because of TCC-protected folders) |
 | Activity export menu (save panel) | **Partial** | Compiled |
 | Cleaner, Developer Tools, Applications, Duplicates screens | **Partial** | Compiled. Shared approval sheet; high-risk items need an explicit acknowledgement |
@@ -57,3 +60,22 @@ Last verified: 2026-10-30, milestone 2 (all planned phases). Verification enviro
 - The App Store edition keeps its read-only entitlement: it can review but never move items.
 - MacVault deletes data only from its own database (Delete Scan History), only after confirmation.
 - Scans with unreadable items are `partial`, never `completed`.
+
+## Depth compared with Mole (github.com/tw93/Mole)
+
+Mole is a terminal cleaner that deletes permanently by default. MacVault keeps its own rule: every item is reviewed, approved and moved to the Trash, and checked again right before it moves. Within that rule, coverage compares as follows.
+
+| Mole feature | MacVault | Notes |
+|---|---|---|
+| `clean`: user app caches and logs | Covered | App caches and Old app logs rules (Apple and system caches never offered) |
+| `clean`: browser caches (Safari, Chrome, Firefox, Brave, Edge, Arc) | Covered, except Safari | Browser caches live in ~/Library/Caches and are offered by the App caches rule; Safari’s are Apple’s and stay |
+| `clean`: npm, pnpm, pip, Homebrew, Yarn, CocoaPods, Go build caches | Covered | pip, Homebrew, Yarn, CocoaPods, go-build via App caches; npm, pnpm store, Cargo, Go modules, Maven, Gradle, Dart via Developer Tools |
+| `clean`: orphaned app data | Covered | Leftovers of uninstalled apps: Application Support, Containers, Preferences; owner verified with Launch Services, extensions mapped to their app, 30-day age, never pre-selected |
+| `clean`: Trash | Not offered by design | MacVault moves items to the Trash; emptying it is Finder’s job |
+| `installer`: DMG/PKG/ISO/XIP in Downloads, Desktop, … | Covered for Downloads and Desktop | 30 days old, medium risk, never pre-selected |
+| `purge`: project artifacts (node_modules, target, build, …) | Covered | Developer Tools › Project Build Folders, only next to project files |
+| `uninstall` with leftovers | Covered, except LaunchAgents | Applications screen; app and its data are separate reviewed steps; login items are never listed by design |
+| `analyze`: disk explorer | Covered | Storage Analyzer: whole Mac or any folder, drill-down, treemap, largest files |
+| `optimize`: DNS flush, QuickLook, icon cache, database maintenance | Out of scope | Not storage work, and would change system state |
+| `status`: hardware and pressure dashboard | Out of scope | Not storage work |
+| `slim`: strip Intel code from universal apps | Out of scope | Modifies signed app bundles; breaks the “only move to Trash” rule |

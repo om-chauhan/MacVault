@@ -112,10 +112,11 @@ struct CleanerView: View {
                     Text(scan.currentRule ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     Button("Stop") { scan.cancel() }
                         .help("Stop looking. Nothing has been changed.")
-                } else {
-                    Button(scan.findings.isEmpty ? "Find Items" : "Check Again") { scan.scan(policy: model.operations.policy) }
+                } else if !scan.findings.isEmpty {
+                    // Before the first check the start screen below holds the only button.
+                    Button("Check Again") { scan.scan(policy: model.operations.policy) }
                         .disabled(model.operations.isExecuting)
-                        .help(model.operations.isExecuting ? "Wait until items are moved to the Trash." : "Look for caches and old logs. Read-only.")
+                        .help(model.operations.isExecuting ? "Wait until items are moved to the Trash." : "Look for caches and old logs again. Read-only.")
                 }
             }
 
@@ -126,10 +127,25 @@ struct CleanerView: View {
                 if scan.findings.isEmpty && scan.isScanning {
                     LoadingState(title: "Looking for caches and logs…", message: scan.currentRule)
                 } else if scan.findings.isEmpty {
-                    EmptyState(title: "Review caches and logs", symbol: SidebarItem.cleaner.symbol,
-                               message: "MacVault lists app caches and old logs in your Library with their exact paths and sizes. Nothing is changed until you approve a list.") {
-                        Button("Find Items") { scan.scan(policy: model.operations.policy) }.buttonStyle(.borderedProminent)
-                    }
+                    let logAge = RuleCatalog.userLogs.minimumAgeDays ?? 7
+                    StartScreen(
+                        item: .cleaner, title: "Review caches, logs and leftovers",
+                        message: "MacVault lists app caches, old logs, Mail attachment copies, forgotten installers and data left behind by uninstalled apps, with exact paths and sizes, grouped by rule. You choose what goes; nothing changes until you approve the list.",
+                        actionTitle: "Find Items", actionDisabled: model.operations.isExecuting,
+                        actionHelp: model.operations.isExecuting ? "Wait until items are moved to the Trash." : "Look for caches and old logs. Read-only.",
+                        note: "Read-only · rules \(RuleCatalog.version)",
+                        checksTitle: "What it looks for",
+                        checks: RuleCatalog.cleanerRules.map(StartFact.init(rule:)),
+                        safety: [
+                            StartFact("Apple and system caches", symbol: "apple.logo",
+                                      detail: "Caches and logs of macOS and Apple services are never offered."),
+                            StartFact("Recent logs", symbol: "clock.fill",
+                                      detail: "Logs changed within the last \(logAge) days are kept."),
+                            StartFact("Your documents and photos", symbol: "doc.fill",
+                                      detail: "Only the locations above are examined. Documents, photos, mailboxes and the data of installed apps are never listed."),
+                            StartFact("Installed and running apps", symbol: "play.circle.fill",
+                                      detail: "Leftovers are offered only when no copy of the app exists anywhere on this Mac. Caches of a running app are skipped until you quit it."),
+                        ]) { scan.scan(policy: model.operations.policy) }
                 } else {
                     ReviewSummaryCard(title: "Found", symbol: "sparkles", tint: Palette.cleaner,
                                       totalBytes: scan.findings.reduce(0) { $0 + $1.totalBytes },
@@ -144,12 +160,15 @@ struct CleanerView: View {
             .padding(.bottom, Spacing.m)
             .frame(maxHeight: .infinity, alignment: .top)
 
-            ReviewFooter(count: scan.selectedCandidates.count, bytes: scan.selectedBytes, buttonTitle: "Review & Move to Trash…",
-                         disabled: model.operations.isExecuting || scan.isScanning) {
-                Task {
-                    await model.operations.review(.cleanup, title: "Caches and logs", candidates: scan.selectedCandidates,
-                                                  inUseCheck: { RunningApps.cleanupConflict($0) }) {
-                        if case .finished(let manifest) = model.operations.phase { scan.removeProcessed(manifest) }
+            // Nothing to review before the first check, so no footer either.
+            if !scan.findings.isEmpty {
+                ReviewFooter(count: scan.selectedCandidates.count, bytes: scan.selectedBytes, buttonTitle: "Review & Move to Trash…",
+                             disabled: model.operations.isExecuting || scan.isScanning) {
+                    Task {
+                        await model.operations.review(.cleanup, title: "Caches and logs", candidates: scan.selectedCandidates,
+                                                      inUseCheck: { RunningApps.cleanupConflict($0) }) {
+                            if case .finished(let manifest) = model.operations.phase { scan.removeProcessed(manifest) }
+                        }
                     }
                 }
             }
@@ -158,6 +177,6 @@ struct CleanerView: View {
     }
 
     private func subtitle(_ scan: RuleScanModel) -> String {
-        "Caches and logs · " + (scan.lastScanned.map { "checked \($0.relative) · rules \(RuleCatalog.version)" } ?? "rules \(RuleCatalog.version)")
+        "Caches, logs, installers and leftovers · " + (scan.lastScanned.map { "checked \($0.relative) · rules \(RuleCatalog.version)" } ?? "rules \(RuleCatalog.version)")
     }
 }

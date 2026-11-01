@@ -176,6 +176,34 @@ enum RunningApps {
         !NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty
     }
 
+    /// Installed anywhere Launch Services knows about (any folder, any volume), or currently running.
+    /// Used to decide whether app data in ~/Library is a leftover.
+    static let isInstalled: @Sendable (String) -> Bool = { bundleId in
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) != nil
+            || !NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty
+    }
+
+    /// Bundle identifiers of the apps in the Applications folders (one subfolder deep), the system
+    /// apps, and everything running. Read from each bundle's Info.plist; nothing is launched.
+    static func installedBundleIdentifiers(roots: [String]) -> Set<String> {
+        var ids = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+        let fm = FileManager.default
+        for root in roots + ["/System/Applications", "/System/Applications/Utilities"] {
+            guard let names = try? fm.contentsOfDirectory(atPath: root) else { continue }
+            for name in names {
+                let path = root + "/" + name
+                if name.hasSuffix(".app") {
+                    if let id = Bundle(path: path)?.bundleIdentifier { ids.insert(id) }
+                } else if let inner = try? fm.contentsOfDirectory(atPath: path) {
+                    for app in inner where app.hasSuffix(".app") {
+                        if let id = Bundle(path: path + "/" + app)?.bundleIdentifier { ids.insert(id) }
+                    }
+                }
+            }
+        }
+        return ids
+    }
+
     /// Tools whose caches must not be moved while they run, keyed by rule.
     private static let toolsByRule: [String: [(bundleId: String, name: String)]] = [
         "xcode-derived-data": [("com.apple.dt.Xcode", "Xcode")],

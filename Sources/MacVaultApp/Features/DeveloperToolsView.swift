@@ -63,10 +63,11 @@ struct DeveloperToolsView: View {
                 Text(scan.currentRule ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 Button("Stop") { scan.cancel() }
                     .help("Stop looking. Nothing has been changed.")
-            } else {
-                Button(scan.findings.isEmpty ? "Find Caches" : "Check Again") { scan.scan(policy: model.operations.policy) }
+            } else if !scan.findings.isEmpty {
+                // Before the first check the start screen holds the only button.
+                Button("Check Again") { scan.scan(policy: model.operations.policy) }
                     .disabled(model.operations.isExecuting)
-                    .help(model.operations.isExecuting ? "Wait until items are moved to the Trash." : "Look for developer caches. Read-only.")
+                    .help(model.operations.isExecuting ? "Wait until items are moved to the Trash." : "Look for developer caches again. Read-only.")
             }
         }
     }
@@ -77,10 +78,24 @@ struct DeveloperToolsView: View {
         if scan.findings.isEmpty && scan.isScanning {
             LoadingState(title: "Looking for developer caches…", message: scan.currentRule)
         } else if scan.findings.isEmpty {
-            EmptyState(title: "Xcode, Simulator, Gradle, npm and Dart caches", symbol: SidebarItem.developer.symbol,
-                       message: "Global caches are listed by tool, with what rebuilding them costs. Source code, Git data, signing assets and simulator devices are never offered.") {
-                Button("Find Caches") { scan.scan(policy: model.operations.policy) }.buttonStyle(.borderedProminent)
-            }
+            StartScreen(
+                item: .developer, title: "Reclaim developer caches",
+                message: "Xcode, Simulator, Gradle, npm and Dart caches are listed by tool, with what rebuilding each one costs. Higher-risk items such as archives are never pre-selected.",
+                actionTitle: "Find Caches", actionDisabled: model.operations.isExecuting,
+                actionHelp: model.operations.isExecuting ? "Wait until items are moved to the Trash." : "Look for developer caches. Read-only.",
+                note: "Read-only · rules \(RuleCatalog.version)",
+                checksTitle: "What it looks for",
+                checks: RuleCatalog.developerRules.map(StartFact.init(rule:)),
+                safety: [
+                    StartFact("Source code and Git data", symbol: "chevron.left.forwardslash.chevron.right",
+                              detail: "Only caches and build products are offered; projects and version control data are never listed."),
+                    StartFact("Signing assets", symbol: "key.fill",
+                              detail: "Certificates, provisioning profiles and keychains are never listed."),
+                    StartFact("Simulator devices", symbol: "iphone",
+                              detail: "Your simulators and the apps installed on them stay; only their caches are offered."),
+                    StartFact("Tools in use", symbol: "play.circle.fill",
+                              detail: "Xcode and Simulator caches are skipped while those tools are running."),
+                ]) { scan.scan(policy: model.operations.policy) }
         } else {
             ReviewSummaryCard(title: "Found", symbol: "hammer.fill", tint: Palette.developer,
                               totalBytes: scan.findings.reduce(0) { $0 + $1.totalBytes },
@@ -122,14 +137,15 @@ struct DeveloperToolsView: View {
                 ProgressView().controlSize(.small)
                 Button("Stop") { projects.cancel() }
                     .help("Stop looking. Nothing has been changed.")
-            } else {
-                Button(projectSearched ? "Search Again" : "Find Build Folders") {
+            } else if projectSearched {
+                // Before the first search the start screen holds the only button.
+                Button("Search Again") {
                     if let location = projectLocation {
                         projects.scan(location: location, access: model.access, policy: model.operations.policy)
                     }
                 }
                 .disabled(projectLocation == nil || model.operations.isExecuting)
-                .help(projectLocation == nil ? "Choose a projects folder first." : "Look for build folders next to project files. Read-only.")
+                .help(projectLocation == nil ? "Choose a projects folder first." : "Look for build folders next to project files again. Read-only.")
             }
         }
     }
@@ -150,20 +166,35 @@ struct DeveloperToolsView: View {
         if projects.candidates.isEmpty && projects.isScanning {
             LoadingState(title: "Looking for project build folders…",
                          message: "Only folders next to their project files are listed. Nothing is changed.")
+        } else if projects.candidates.isEmpty && projectSearched {
+            // "Search Again" is in the header.
+            EmptyState(title: "No build folders found", symbol: "shippingbox",
+                       message: "No build folders were found next to project files in \(PathUtilities.abbreviatingHome(projects.scannedPath ?? "")).")
         } else if projects.candidates.isEmpty {
-            EmptyState(title: projectSearched ? "No build folders found" : "Build folders in your projects",
-                       symbol: "shippingbox",
-                       message: !projectSearched
-                           ? "MacVault looks for node_modules, Flutter and Gradle build folders, .dart_tool and Rust target folders — only next to their project files, and never inside Git data."
-                           : "No build folders were found in \(PathUtilities.abbreviatingHome(projects.scannedPath ?? "")).") {
-                if let location = projectLocation {
-                    Button(projectSearched ? "Search Again" : "Find Build Folders") {
+            StartScreen(
+                item: .developer, title: "Find build folders in your projects",
+                message: "Build output a tool can recreate (node_modules, build, target, …) is listed only when it sits next to its project file, so your sources are never mistaken for output.",
+                actionTitle: "Find Build Folders",
+                actionDisabled: projectLocation == nil || model.operations.isExecuting,
+                actionHelp: projectLocation == nil ? "Choose a projects folder first." : "Look for build folders next to project files. Read-only.",
+                note: projectLocation.map { "In \($0.displayPath)" } ?? "Choose a projects folder above",
+                checksTitle: "Folders it recognises",
+                checks: ProjectArtifactKind.all.map { kind in
+                    StartFact("\(kind.ecosystem) · \(kind.folderName)", symbol: "shippingbox.fill",
+                              detail: "Next to \(kind.markers.joined(separator: " or ")). \(kind.consequence)")
+                },
+                safety: [
+                    StartFact("Your source files", symbol: "chevron.left.forwardslash.chevron.right",
+                              detail: "Only the build output folder is offered; the project itself is never listed."),
+                    StartFact("Git data", symbol: "arrow.triangle.branch",
+                              detail: "Folders that contain version control data are never offered, and .git is never entered."),
+                    StartFact("Packages and your Library", symbol: "shippingbox",
+                              detail: "App and library packages, hidden folders and ~/Library are never searched."),
+                ]) {
+                    if let location = projectLocation {
                         projects.scan(location: location, access: model.access, policy: model.operations.policy)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.operations.isExecuting)
                 }
-            }
         } else {
             ReviewSummaryCard(title: "Found", symbol: "shippingbox.fill", tint: Palette.developer,
                               totalBytes: projects.candidates.reduce(0) { $0 + ($1.logicalBytes ?? 0) },
@@ -202,28 +233,33 @@ struct DeveloperToolsView: View {
 
     // MARK: Footer
 
+    /// Shown only once there is something to review.
     @ViewBuilder
     private var footer: some View {
         switch section {
         case .caches:
             let scan = model.developerCaches
-            ReviewFooter(count: scan.selectedCandidates.count, bytes: scan.selectedBytes, buttonTitle: "Review & Move to Trash…",
-                         disabled: model.operations.isExecuting || scan.isScanning) {
-                Task {
-                    await model.operations.review(.developerCleanup, title: "Developer caches", candidates: scan.selectedCandidates,
-                                                  inUseCheck: { RunningApps.cleanupConflict($0) }) {
-                        if case .finished(let manifest) = model.operations.phase { scan.removeProcessed(manifest) }
+            if !scan.findings.isEmpty {
+                ReviewFooter(count: scan.selectedCandidates.count, bytes: scan.selectedBytes, buttonTitle: "Review & Move to Trash…",
+                             disabled: model.operations.isExecuting || scan.isScanning) {
+                    Task {
+                        await model.operations.review(.developerCleanup, title: "Developer caches", candidates: scan.selectedCandidates,
+                                                      inUseCheck: { RunningApps.cleanupConflict($0) }) {
+                            if case .finished(let manifest) = model.operations.phase { scan.removeProcessed(manifest) }
+                        }
                     }
                 }
             }
         case .projects:
             let projects = model.projects
-            ReviewFooter(count: projects.selectedCandidates.count, bytes: projects.selectedBytes,
-                         buttonTitle: "Review & Move to Trash…", disabled: model.operations.isExecuting || projects.isScanning) {
-                Task {
-                    await model.operations.review(.developerCleanup, title: "Project build folders",
-                                                  candidates: projects.selectedCandidates) {
-                        if case .finished(let manifest) = model.operations.phase { projects.removeProcessed(manifest) }
+            if !projects.candidates.isEmpty {
+                ReviewFooter(count: projects.selectedCandidates.count, bytes: projects.selectedBytes,
+                             buttonTitle: "Review & Move to Trash…", disabled: model.operations.isExecuting || projects.isScanning) {
+                    Task {
+                        await model.operations.review(.developerCleanup, title: "Project build folders",
+                                                      candidates: projects.selectedCandidates) {
+                            if case .finished(let manifest) = model.operations.phase { projects.removeProcessed(manifest) }
+                        }
                     }
                 }
             }

@@ -31,7 +31,10 @@ final class RuleScanModel {
         isScanning = true
         error = nil
         let rules = self.rules
-        let finder = CleanupCandidateFinder(home: policy.home, policy: policy)
+        // Leftover rules ask Launch Services whether the owning app is still installed anywhere, and
+        // check shared preference files against the apps in the Applications folders.
+        let finder = CleanupCandidateFinder(home: policy.home, policy: policy, isInstalled: RunningApps.isInstalled,
+                                            installedBundleIdentifiers: RunningApps.installedBundleIdentifiers(roots: policy.applicationRoots))
         let report: @Sendable (CleanupRule) async -> Void = { [weak self] rule in
             await self?.setCurrent(rule.title)
         }

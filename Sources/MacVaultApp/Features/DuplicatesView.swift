@@ -29,13 +29,16 @@ struct DuplicatesView: View {
             .padding(.bottom, Spacing.m)
             .frame(maxHeight: .infinity, alignment: .top)
 
-            ReviewFooter(count: dups.selectedCount, bytes: dups.selectedBytes, buttonTitle: "Review & Move Copies to Trash…",
-                         disabled: model.operations.isExecuting || dups.isScanning) {
-                let estimated = dups.selectedBytes
-                Task {
-                    await model.operations.review(.duplicateRemoval, title: "Duplicate copies", estimatedBytes: estimated,
-                                                  items: { dups.removalItems(manifestId: $0) }) {
-                        if case .finished(let manifest) = model.operations.phase { dups.removeProcessed(manifest) }
+            // Nothing to review before the first search, so no footer either.
+            if !dups.groups.isEmpty {
+                ReviewFooter(count: dups.selectedCount, bytes: dups.selectedBytes, buttonTitle: "Review & Move Copies to Trash…",
+                             disabled: model.operations.isExecuting || dups.isScanning) {
+                    let estimated = dups.selectedBytes
+                    Task {
+                        await model.operations.review(.duplicateRemoval, title: "Duplicate copies", estimatedBytes: estimated,
+                                                      items: { dups.removalItems(manifestId: $0) }) {
+                            if case .finished(let manifest) = model.operations.phase { dups.removeProcessed(manifest) }
+                        }
                     }
                 }
             }
@@ -81,13 +84,14 @@ struct DuplicatesView: View {
             Text(progressText(dups.progress)).font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
             Button("Stop") { dups.cancel() }
                 .help("Stop searching. Nothing has been changed.")
-        } else {
-            Button(dups.result == nil ? "Find Duplicates" : "Search Again") {
+        } else if dups.result != nil {
+            // Before the first search the start screen holds the only button.
+            Button("Search Again") {
                 if let location { dups.scan(location: location, access: model.access, policy: model.operations.policy,
                                             exclusions: model.settings.exclusions) }
             }
             .disabled(location == nil || model.operations.isExecuting)
-            .help(location == nil ? "Choose a folder first." : "Compare files by size, then by content. Read-only.")
+            .help(location == nil ? "Choose a folder first." : "Compare files by size, then by content again. Read-only.")
         }
     }
 
@@ -138,19 +142,42 @@ struct DuplicatesView: View {
         if dups.groups.isEmpty && dups.isScanning {
             LoadingState(title: progressText(dups.progress),
                          message: "Files are compared by size, then by content hash. Nothing is changed.")
+        } else if dups.groups.isEmpty, dups.result != nil {
+            // "Search Again" is in the header.
+            EmptyState(title: "No duplicates found", symbol: "doc.on.doc",
+                       message: "No files of at least \(dups.minimumSizeMB) MB with identical content were found in \(location?.displayPath ?? "this folder"). Lower the minimum size or choose another folder to search again.")
         } else if dups.groups.isEmpty {
-            EmptyState(title: dups.result == nil ? "Find files with identical content" : "No duplicates found",
-                       symbol: "doc.on.doc",
-                       message: "Files are compared by size, then by content hash. Nothing is removed automatically — you choose which copy to keep. App libraries, packages, Git data and your Library folder are never searched.") {
-                if let location {
-                    Button(dups.result == nil ? "Find Duplicates" : "Search Again") {
+            StartScreen(
+                item: .duplicates, title: "Find files with identical content",
+                message: "Files of at least \(dups.minimumSizeMB) MB in the chosen folder are compared by size, then by content. Every group is confirmed with a full SHA-256 hash before it is listed, and you choose which copy to keep.",
+                actionTitle: "Find Duplicates",
+                actionDisabled: location == nil || model.operations.isExecuting,
+                actionHelp: location == nil ? "Choose a folder first." : "Compare files by size, then by content. Read-only.",
+                note: location.map { "In \($0.displayPath) · files ≥ \(dups.minimumSizeMB) MB" } ?? "Choose a folder above",
+                checksTitle: "How files are compared",
+                checks: [
+                    StartFact("Same size", symbol: "1.circle.fill",
+                              detail: "Only files with an identical size can be copies; everything else is skipped without being read."),
+                    StartFact("Same content", symbol: "2.circle.fill",
+                              detail: "Candidates are hashed and grouped: the first bytes decide quickly, a full SHA-256 confirms each group."),
+                    StartFact("You keep one", symbol: "3.circle.fill",
+                              detail: "Each group suggests a copy to keep. Change it with Keep This before you review the rest."),
+                ],
+                safety: [
+                    StartFact("App libraries and packages", symbol: "shippingbox",
+                              detail: "Apps, photo libraries and other packages are never searched inside."),
+                    StartFact("Git data and node_modules", symbol: "arrow.triangle.branch",
+                              detail: "Version control data and dependency folders are skipped."),
+                    StartFact("Your Library folder", symbol: "folder.fill",
+                              detail: "App data in ~/Library is never searched for duplicates."),
+                    StartFact("Hard-linked files", symbol: "link",
+                              detail: "They already share one copy on disk, so removing one frees nothing; they are never offered."),
+                ]) {
+                    if let location {
                         dups.scan(location: location, access: model.access, policy: model.operations.policy,
                                   exclusions: model.settings.exclusions)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.operations.isExecuting)
                 }
-            }
         } else {
             List {
                 ForEach(dups.groups) { group in

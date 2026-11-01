@@ -72,12 +72,13 @@ struct ApplicationsView: View {
                         .accessibilityLabel("Reading applications, \(apps.progress.done) of \(apps.progress.total)")
                     Button("Stop") { apps.cancel() }
                         .help("Stop reading applications. Nothing has been changed.")
-                } else {
-                    Button(apps.apps.isEmpty ? "List Applications" : "Refresh") {
+                } else if !apps.apps.isEmpty {
+                    // Before the first listing the start screen below holds the only button.
+                    Button("Refresh") {
                         apps.scan(policy: model.operations.policy, store: model.store)
                     }
                     .disabled(model.operations.isExecuting)
-                    .help(model.operations.isExecuting ? "Wait until items are moved to the Trash." : "Read /Applications and ~/Applications. Read-only.")
+                    .help(model.operations.isExecuting ? "Wait until items are moved to the Trash." : "Read /Applications and ~/Applications again. Read-only.")
                 }
             }
 
@@ -90,12 +91,29 @@ struct ApplicationsView: View {
                     LoadingState(title: "Reading applications…",
                                  message: "\(apps.progress.done) of \(apps.progress.total) measured. Nothing is changed.")
                 } else if apps.apps.isEmpty {
-                    EmptyState(title: "Installed applications", symbol: SidebarItem.applications.symbol,
-                               message: "MacVault lists apps in /Applications and ~/Applications with their size. Removing an app and removing its data are separate, reviewed steps. Apple apps can’t be removed.") {
-                        Button("List Applications") { apps.scan(policy: model.operations.policy, store: model.store) }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(model.operations.isExecuting)
-                    }
+                    StartScreen(
+                        item: .applications, title: "See what your apps take",
+                        message: "MacVault lists the apps in /Applications and ~/Applications with the size of each bundle, then shows the data each one keeps in your Library. Removing an app and removing its data are separate, reviewed steps.",
+                        actionTitle: "List Applications", actionDisabled: model.operations.isExecuting,
+                        actionHelp: model.operations.isExecuting ? "Wait until items are moved to the Trash." : "Read /Applications and ~/Applications. Read-only.",
+                        note: "Read-only until you approve a removal",
+                        checksTitle: "What it lists",
+                        checks: [
+                            StartFact("App bundles", symbol: "shippingbox.fill",
+                                      detail: "Every app in /Applications and ~/Applications, one folder deep, with its measured size and version."),
+                            StartFact("Data in your Library", symbol: "folder.fill",
+                                      detail: "Caches, Application Support, Preferences, Containers, logs, saved state and web data that match the app’s bundle identifier or name."),
+                            StartFact("Apps in use", symbol: "play.circle.fill",
+                                      detail: "A running app is reported and never moved until you quit it."),
+                        ],
+                        safety: [
+                            StartFact("Apple apps", symbol: "apple.logo",
+                                      detail: "Part of macOS or managed by Apple: listed with their size, never removable here."),
+                            StartFact("Login items and keychains", symbol: "key.fill",
+                                      detail: "Never listed as app data."),
+                            StartFact("Uncertain matches", symbol: "questionmark.circle.fill",
+                                      detail: "Items that match only the app’s name are marked less certain and never pre-selected."),
+                        ]) { apps.scan(policy: model.operations.policy, store: model.store) }
                 } else {
                     summary(apps)
                     // The list takes the width; the selected app's detail is a fixed-width inspector card.
