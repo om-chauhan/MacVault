@@ -1,0 +1,61 @@
+name: Build
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - run: swift test
+
+      # MacVault.xcodeproj and Config/Info.plist are gitignored; XcodeGen creates them.
+      - run: brew install xcodegen && xcodegen generate
+
+      # ponytail: ad-hoc signed, so Gatekeeper blocks the download. Add Developer ID signing and notarytool once there is an Apple Developer account.
+      - name: Build universal Direct edition
+        run: |
+          version=()
+          [[ "$GITHUB_REF" == refs/tags/v* ]] && version=("MARKETING_VERSION=${GITHUB_REF_NAME#v}")
+          xcodebuild -project MacVault.xcodeproj -scheme MacVault-Direct -configuration Release \
+            -destination 'generic/platform=macOS' -derivedDataPath build \
+            CODE_SIGN_IDENTITY=- CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" "${version[@]}" build
+
+      # ditto keeps the bundle's symlinks and signature intact.
+      - run: ditto -c -k --keepParent build/Build/Products/Release/MacVault.app MacVault.zip
+
+      - uses: actions/upload-artifact@v7
+        with:
+          path: MacVault.zip
+          archive: false
+
+  # Separate job so tests and builds never run with a token that can write to the repo.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: MacVault.zip
+          path: dist
+          skip-decompress: true
+
+      - name: Publish GitHub Release
+        run: |
+          mv dist/* MacVault.zip
+          gh release create "$GITHUB_REF_NAME" MacVault.zip --repo "$GITHUB_REPOSITORY" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

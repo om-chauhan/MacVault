@@ -52,6 +52,19 @@ Optional performance smoke test (read-only):
 MACVAULT_PERF_ROOT=/Applications swift test -c release --filter PerformanceSmoke
 ```
 
+## Download a build
+Every push to `master` and every pull request runs `swift test`, then builds a universal Direct-edition `MacVault.zip`. Download it from the **Artifacts** section of the run's page in the **Actions** tab. Artifacts expire after 90 days by default.
+
+To publish a permanent copy as a GitHub Release, push a version tag. The tag sets the app's version:
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+Builds are not notarized yet, so macOS blocks them on first open. After moving the app to Applications, clear the download flag:
+```bash
+xattr -dr com.apple.quarantine /Applications/MacVault.app
+```
+
 ## Run the core on Linux (CI)
 Requires `libsqlite3-dev`. `swift test` builds and tests `MacVaultCore`; the app target is skipped automatically.
 
