@@ -3,7 +3,6 @@ name: Build
 on:
   push:
     branches: [master]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -14,8 +13,18 @@ jobs:
   build:
     runs-on: macos-26
     timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+
+      # Major.minor comes from project.yml; the run number makes every version unique and increasing.
+      # ponytail: run numbers also count PR runs, so versions have gaps. Use latest tag + 1 if gaps matter.
+      - id: version
+        run: |
+          base=$(sed -n 's/.*MARKETING_VERSION: \([0-9]*\.[0-9]*\).*/\1/p' project.yml)
+          test -n "$base"
+          echo "version=$base.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
 
       - run: swift test
 
@@ -25,37 +34,53 @@ jobs:
       # ponytail: ad-hoc signed, so Gatekeeper blocks the download. Add Developer ID signing and notarytool once there is an Apple Developer account.
       - name: Build universal Direct edition
         run: |
-          version=()
-          [[ "$GITHUB_REF" == refs/tags/v* ]] && version=("MARKETING_VERSION=${GITHUB_REF_NAME#v}")
           xcodebuild -project MacVault.xcodeproj -scheme MacVault-Direct -configuration Release \
             -destination 'generic/platform=macOS' -derivedDataPath build \
-            CODE_SIGN_IDENTITY=- CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" "${version[@]}" build
+            CODE_SIGN_IDENTITY=- MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" build
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
 
-      # ditto keeps the bundle's symlinks and signature intact.
-      - run: ditto -c -k --keepParent build/Build/Products/Release/MacVault.app MacVault.zip
+      # ditto keeps the bundle's symlinks and signature intact. The Applications link is the DMG's drag-to-install target.
+      - name: Package zip and DMG
+        run: |
+          app=build/Build/Products/Release/MacVault.app
+          ditto -c -k --keepParent "$app" MacVault.zip
+          mkdir dmg
+          mv "$app" dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname MacVault -srcfolder dmg -format UDZO MacVault.dmg
 
+      # archive: false takes a single file, so each one gets its own upload.
       - uses: actions/upload-artifact@v7
         with:
           path: MacVault.zip
           archive: false
 
+      - uses: actions/upload-artifact@v7
+        with:
+          path: MacVault.dmg
+          archive: false
+
   # Separate job so tests and builds never run with a token that can write to the repo.
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      # With several artifacts, each one lands in dist/<artifact name>/.
       - uses: actions/download-artifact@v8
         with:
-          name: MacVault.zip
           path: dist
           skip-decompress: true
 
-      - name: Publish GitHub Release
+      # gh creates the tag. Tags made with this token start no new runs, so this can't loop.
+      - name: Tag and publish GitHub Release
         run: |
-          mv dist/* MacVault.zip
-          gh release create "$GITHUB_REF_NAME" MacVault.zip --repo "$GITHUB_REPOSITORY" --generate-notes
+          mv dist/MacVault.zip/* MacVault.zip
+          mv dist/MacVault.dmg/* MacVault.dmg
+          gh release create "v$VERSION" MacVault.zip MacVault.dmg --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}

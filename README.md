@@ -53,12 +53,9 @@ MACVAULT_PERF_ROOT=/Applications swift test -c release --filter PerformanceSmoke
 ```
 
 ## Download a build
-Every push to `master` and every pull request runs `swift test`, then builds a universal Direct-edition `MacVault.zip`. Download it from the **Artifacts** section of the run's page in the **Actions** tab. Artifacts expire after 90 days by default.
+Every pull request, push to `master` and manual run executes `swift test`, then builds a universal Direct-edition `MacVault.dmg` and `MacVault.zip`. Download them from the **Artifacts** section of the run's page in the **Actions** tab. Artifacts expire after 90 days by default.
 
-To publish a permanent copy as a GitHub Release, push a version tag. The tag sets the app's version:
-```bash
-git tag v0.2.0 && git push origin v0.2.0
-```
+Each push to `master` also tags its commit and publishes both files as a GitHub Release. Versions look like `v0.1.37`: `MARKETING_VERSION` in `project.yml` sets the first two numbers, so change it there to start a new series. The last number is the CI run number, and gaps are normal because pull request runs use the same counter.
 
 Builds are not notarized yet, so macOS blocks them on first open. After moving the app to Applications, clear the download flag:
 ```bash
