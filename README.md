@@ -32,6 +32,8 @@ Documentation/                decisions (ADRs), capability matrix
 ## Run on a Mac (Xcode 15.3+ / Swift 5.10+, macOS 14+)
 In Xcode, open `Package.swift` and select the **MacVaultApp** scheme with the **My Mac** destination, then press Run.
 The default `MacVault-Package` scheme only builds libraries and has nothing to launch.
+This runs a bare executable, not an `.app` bundle: the Dock icon is set at launch from a packaged copy of the icon, but
+Finder, Spotlight and notifications only see the icon in the bundled app built from `MacVault.xcodeproj` below.
 
 From the command line:
 ```bash

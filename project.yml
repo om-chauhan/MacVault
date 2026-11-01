@@ -19,7 +19,9 @@ targets:
     type: application
     platform: macOS
     sources:
-      - Sources/MacVaultApp
+      # Resources/ holds the Dock icon for the unbundled SwiftPM run; the app uses the asset catalog.
+      - path: Sources/MacVaultApp
+        excludes: ["Resources"]
       - path: Config/PrivacyInfo.xcprivacy
         buildPhase: resources
       - path: Config/Assets.xcassets

@@ -32,7 +32,10 @@ targets.append(
     .executableTarget(
         name: "MacVaultApp",
         dependencies: ["MacVaultCore"],
-        path: "Sources/MacVaultApp"
+        path: "Sources/MacVaultApp",
+        // Dock icon for the unbundled run (`swift run`, the MacVaultApp scheme); the bundled app
+        // uses the asset catalog instead.
+        resources: [.copy("Resources/AppIcon.png")]
     )
 )
 #endif

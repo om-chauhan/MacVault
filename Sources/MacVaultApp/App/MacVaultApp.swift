@@ -44,7 +44,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Needed when launched via `swift run` (no app bundle) so the window can take focus.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        Self.applyDockIconIfUnbundled()
         AppEnvironment.applyUITestHooks()
+    }
+
+    /// Without an app bundle (SwiftPM `MacVaultApp` scheme, `swift run`) there is no Info.plist or asset
+    /// catalog, so the Dock shows a generic executable icon. The package ships the icon as a resource
+    /// and sets it at launch. The bundled app gets its icon from the asset catalog and skips this.
+    private static func applyDockIconIfUnbundled() {
+        guard Bundle.main.bundleURL.pathExtension != "app" else { return }
+        #if SWIFT_PACKAGE
+        if let url = Bundle.module.url(forResource: "AppIcon", withExtension: "png"),
+           let image = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = image
+            Log.app.info("Dock icon set from the package resource (unbundled run)")
+        } else {
+            Log.app.error("Dock icon resource missing from the package bundle")
+        }
+        #endif
     }
 
     /// With the menu bar item shown, MacVault keeps running after its window closes so scheduled
