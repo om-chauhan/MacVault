@@ -1,110 +1,162 @@
+<div align="center">
+
+<img src="Config/Assets.xcassets/AppIcon.appiconset/icon_256x256.png" width="128" height="128" alt="MacVault app icon: a vault door with a colourful storage ring">
+
 # MacVault
 
-Native macOS storage intelligence: volume capacity, read-only scanning with drill-down and treemap, and reviewed cleanup of caches, logs, developer files, applications and duplicates. Activity export, scheduled scans and a menu bar item are included.
+**See what's filling your Mac's disk, then clear it safely.**
 
-MacVault never deletes files. The only change it can make is to move items **you approved** to the Trash, after checking each one again right before it moves.
+A native, local-only macOS app. You review every item, and approved items go to the Trash. Nothing is deleted outright.
 
-See `FEATURE_STATUS.md` for verified status. It is the source of truth.
+[![Build](https://github.com/om-chauhan/MacVault/actions/workflows/build.yml/badge.svg)](https://github.com/om-chauhan/MacVault/actions/workflows/build.yml)
+[![Latest release](https://img.shields.io/github/v/release/om-chauhan/MacVault?label=release)](https://github.com/om-chauhan/MacVault/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![macOS 14 or later](https://img.shields.io/badge/macOS-14%2B-lightgrey?logo=apple&logoColor=white)](#install)
+[![Built with SwiftUI](https://img.shields.io/badge/SwiftUI-native-F05138?logo=swift&logoColor=white)](Package.swift)
+[![No telemetry](https://img.shields.io/badge/telemetry-none-success)](#how-it-stays-safe)
 
-## Layout
-```
-Package.swift                 SwiftPM: MacVaultCore (all platforms) + MacVault app (macOS only)
-Sources/CSQLite/              system SQLite module map
-Sources/MacVaultCore/
-  Domain/                     typed models, statuses, errors, operations, applications
-  Filesystem/                 FileSystemProbe (read-only), FilesystemScanner, ItemMeasurer
-  Safety/                     SafetyPolicy, OperationExecutor (the only code that moves files, to the Trash)
-  Cleanup/                    versioned rule catalog, candidate finder, project build folders
-  Applications/               app inventory and associated ~/Library data
-  Duplicates/                 size → prefix hash → SHA-256 duplicate finder
-  Volume/                     VolumeInfoService (URLResourceValues, statvfs fallback)
-  Persistence/                SQLite wrapper, migrations v1–v3, Store actor
-  Services/                   ScanService, LaunchReconciler, ActivityExporter, schedule/low-storage logic
-  Logging/ Support/           OSLog categories, byte/time/path helpers
-Sources/MacVaultApp/          SwiftUI app (App, DesignSystem, Features)
-Tests/MacVaultCoreTests/      unit, isolated-filesystem integration, safety, perf smoke
-Config/                       entitlements per edition, PrivacyInfo.xcprivacy, Assets.xcassets (AppIcon)
-Scripts/generate-icon.swift   regenerates the AppIcon set: swift Scripts/generate-icon.swift
-project.yml                   XcodeGen spec: MacVault-Direct and MacVault-AppStore schemes
-Documentation/                decisions (ADRs), capability matrix
-```
+**[Download for macOS](https://github.com/om-chauhan/MacVault/releases/latest/download/MacVault.dmg)** · [Features](#features) · [How it stays safe](#how-it-stays-safe) · [Screenshots](#screenshots) · [Build from source](#build-from-source)
 
-## Run on a Mac (Xcode 15.3+ / Swift 5.10+, macOS 14+)
-In Xcode, open `Package.swift` and select the **MacVaultApp** scheme with the **My Mac** destination, then press Run.
-The default `MacVault-Package` scheme only builds libraries and has nothing to launch.
-This runs a bare executable, not an `.app` bundle: the Dock icon is set at launch from a packaged copy of the icon, but
-Finder, Spotlight and notifications only see the icon in the bundled app built from `MacVault.xcodeproj` below.
+<img src="Documentation/Images/demo.gif" width="800" alt="Animated walkthrough: the Overview, a storage breakdown, Cleaner results, the approval sheet, the confirmation after moving items to the Trash, Developer Tools, Duplicates and the Activity log">
 
-From the command line:
+<sub>Real app screens, running on sample test data.</sub>
+
+</div>
+
+> [!NOTE]
+> **MacVault is at an early stage.** The logic that decides what can be moved has thorough automated tests, but the app hasn't had much real-world use yet. Start with a folder you don't mind experimenting on. [FEATURE_STATUS.md](Documentation/FEATURE_STATUS.md) lists exactly what has been verified.
+
+## Features
+
+| Screen | What it does |
+|---|---|
+| **Overview** | Shows capacity, used and available space for each volume, with a history of available space |
+| **Storage Analyzer** | Scans your whole Mac or a folder you choose, read-only, with drill-down, a treemap and your largest files |
+| **Cleaner** | Finds app caches, old logs, Mail attachment copies, saved window state, old installers in Downloads and on the Desktop, and leftovers from uninstalled apps |
+| **Developer Tools** | Finds Xcode DerivedData and Archives, Simulator and device support files, and npm, pnpm, Cargo, Go, Maven, Gradle and Dart caches. Also finds build folders such as `node_modules` and `target`, offered only next to their project files |
+| **Applications** | Lists installed apps. Removing an app and removing its leftover data are separate steps |
+| **Duplicates** | Finds identical files, confirmed with SHA-256, and lets you choose which copy to keep |
+| **Activity** | Keeps a searchable log of every scan, approval and move, exportable as JSON or CSV with optional redaction of your home folder and account name |
+| **Menu bar** | Shows capacity and quick actions, and runs optional scheduled scans and low-storage alerts while the app is open |
+
+## How it stays safe
+
+- **Scanning is read-only.** Scans don't follow symbolic links. If a scan can't read something, it says so and is labelled incomplete.
+- **Nothing moves without your approval.** Each list shows the exact items, sizes and risks, and high-risk items need an extra confirmation.
+- **Items only go to the Trash.** You can put them back until you empty it. The only thing MacVault deletes itself is its own scan history, when you ask it to.
+- **Everything is checked again before it moves.** Right before moving an item, MacVault confirms it's the same file you reviewed and isn't in use or protected. Duplicates are re-hashed on both sides. Anything that changed is skipped and reported.
+- **Sensitive data is off limits.** Protected locations include system folders, Git data, SSH and cloud credentials, keychains, signing certificates, Mail, Messages, iCloud Drive and your Photos and Music libraries.
+- **Your data stays on your Mac.** There's no network code, telemetry or account.
+- **The numbers are honest.** Sizes are measured or reported by the system, and MacVault never claims "space freed", because the Trash still uses space until you empty it.
+
+The design behind these guarantees is explained in [ARCHITECTURE.md](Documentation/ARCHITECTURE.md).
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="Documentation/Images/overview.png" alt="Overview screen with disk usage ring, available space history, last scan and recent activity"><br><b>Overview:</b> your disk at a glance</td>
+    <td width="50%"><img src="Documentation/Images/storage-analyzer.png" alt="Storage Analyzer showing folder sizes as a ring and a ranked list"><br><b>Storage Analyzer:</b> where the space went</td>
+  </tr>
+  <tr>
+    <td><img src="Documentation/Images/approval-sheet.png" alt="Approval sheet listing two items, their sizes and risk, with Cancel and Move to Trash buttons"><br><b>Approval sheet:</b> the same review for every removal</td>
+    <td><img src="Documentation/Images/developer-tools.png" alt="Developer Tools listing Xcode DerivedData as low risk and archives as high risk"><br><b>Developer Tools:</b> every item labelled by risk</td>
+  </tr>
+  <tr>
+    <td><img src="Documentation/Images/duplicates.png" alt="Duplicates screen with two copies of a photo and a Keep marker on one"><br><b>Duplicates:</b> you choose which copy stays</td>
+    <td><img src="Documentation/Images/applications.png" alt="Applications list with a detail panel showing the app bundle and its data in the Library"><br><b>Applications:</b> apps and their data, handled separately</td>
+  </tr>
+  <tr>
+    <td><img src="Documentation/Images/activity.png" alt="Activity log table with time, severity and message columns"><br><b>Activity:</b> a record of everything it did</td>
+    <td><img src="Documentation/Images/light-mode.png" alt="Overview screen in the light appearance"><br><b>Light and dark:</b> follows your system appearance</td>
+  </tr>
+</table>
+
+## Install
+
+MacVault needs macOS 14 Sonoma or later. It's a universal build for Apple silicon and Intel, so far tested on Apple silicon only.
+
+1. Download **[MacVault.dmg](https://github.com/om-chauhan/MacVault/releases/latest/download/MacVault.dmg)** from the [latest release](https://github.com/om-chauhan/MacVault/releases/latest). A `.zip` is also available there.
+2. Open it and drag MacVault to **Applications**.
+3. Builds aren't notarized by Apple yet, so macOS blocks the app when you first open it. If you trust this download, clear the download flag:
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/MacVault.app
+   ```
+
+   If you'd rather not do that, [build it from source](#build-from-source).
+
+On first launch, MacVault explains the permissions it can use. Scanning your whole Mac needs Full Disk Access, which you grant in System Settings. Without it, MacVault reports folders it couldn't read and labels the scan incomplete.
+
+## Build from source
+
+You'll need macOS 14 or later and Xcode 16 or later.
+
 ```bash
-swift test                       # core test suite
-swift run MacVaultApp            # launches the app (unbundled, Direct-edition behavior)
+git clone https://github.com/om-chauhan/MacVault.git
+cd MacVault
+swift test                # run the core test suite
+swift run MacVaultApp     # launch the app, unbundled
 ```
-For a proper bundled, signed app with both editions:
+
+For the bundled app, which is needed for the app icon in Finder and for notifications, generate the Xcode project with [XcodeGen](https://github.com/yonaskolb/XcodeGen):
+
 ```bash
 brew install xcodegen
 xcodegen generate
-open MacVault.xcodeproj          # schemes: MacVault-Direct, MacVault-AppStore
+open MacVault.xcodeproj
 ```
 
-Optional performance smoke test (read-only):
-```bash
-MACVAULT_PERF_ROOT=/Applications swift test -c release --filter PerformanceSmoke
+There are two schemes. `MacVault-Direct` is the full app. `MacVault-AppStore` is sandboxed and review-only, so it can't move items. See [CAPABILITY_MATRIX.md](Documentation/CAPABILITY_MATRIX.md) for the differences.
+
+## Project structure
+
+```
+MacVault/
+├── Sources/
+│   ├── MacVaultCore/        Scanner, finders, safety policy, executor and SQLite store (no UI)
+│   ├── MacVaultApp/         The SwiftUI app
+│   │   ├── App/             Scenes, app state and view models
+│   │   ├── Features/        One file per screen
+│   │   ├── Components/      Views shared across screens
+│   │   ├── DesignSystem/    Spacing, cards, badges and banners
+│   │   └── Resources/       Icon for unbundled runs
+│   └── CSQLite/             System SQLite module map
+├── Tests/
+│   ├── MacVaultCoreTests/   Unit, filesystem integration and safety tests
+│   └── MacVaultUITests/     End-to-end flows and screenshot capture
+├── Config/                  Entitlements, privacy manifest and app icon
+├── Documentation/           Architecture, decisions, design, status and images
+├── Scripts/                 Icon generator and screenshot capture
+├── .github/workflows/       CI and automatic releases
+├── Package.swift            SwiftPM manifest
+└── project.yml              XcodeGen project spec
 ```
 
-## Download a build
-Every pull request, push to `master` and manual run executes `swift test`, then builds a universal Direct-edition `MacVault.dmg` and `MacVault.zip`. Download them from the **Artifacts** section of the run's page in the **Actions** tab. Artifacts expire after 90 days by default.
+## Documentation
 
-Each push to `master` also tags its commit and publishes both files as a GitHub Release. Versions look like `v0.1.37`: `MARKETING_VERSION` in `project.yml` sets the first two numbers, so change it there to start a new series. The last number is the CI run number, and gaps are normal because pull request runs use the same counter.
+| Document | What's in it |
+|---|---|
+| [ARCHITECTURE.md](Documentation/ARCHITECTURE.md) | How the system fits together and how the safety model works |
+| [DECISIONS.md](Documentation/DECISIONS.md) | Why it's built this way, with the trade-offs |
+| [FEATURE_STATUS.md](Documentation/FEATURE_STATUS.md) | What's implemented and how it was verified |
+| [CAPABILITY_MATRIX.md](Documentation/CAPABILITY_MATRIX.md) | Differences between the Direct and App Store editions |
+| [PRD.md](Documentation/PRD.md) | Product requirements and acceptance criteria |
+| [DESIGN.md](Documentation/DESIGN.md) | The visual language |
+| [MILESTONES.md](Documentation/MILESTONES.md) | Past milestone reports |
 
-Builds are not notarized yet, so macOS blocks them on first open. After moving the app to Applications, clear the download flag:
-```bash
-xattr -dr com.apple.quarantine /Applications/MacVault.app
-```
+## Roadmap
 
-## Run the core on Linux (CI)
-Requires `libsqlite3-dev`. `swift test` builds and tests `MacVaultCore`; the app target is skipped automatically.
+- Developer ID signing and notarization, so downloads open without a warning
+- Verify the App Store edition's sandbox and folder access on a signed build
+- More real-world testing across every screen
 
-## Milestone 2 report (all planned phases)
+## Contributing
 
-**Built:** activity export; drill-down and treemap; a Cleaner with a versioned rule engine, safety policy, review/approval manifests and Trash execution with revalidation; application inventory with separate app and app-data removal; a duplicate finder; developer caches and project build folders; and a menu bar item with scheduled read-only scans and low-storage alerts.
+Bug reports, fixes and new cleanup rules are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers setup, the checks to run and the safety rules every change has to keep. To report a security problem, follow [SECURITY.md](SECURITY.md).
 
-**Commands run and results (macOS 27.0.1, Xcode 27.1, Swift 6.4):**
-- `swift build` → succeeded, 0 warnings (core and app)
-- `swift test` → 115 tests: 114 passed, 1 skipped (opt-in perf), 0 failures
-- `xcodebuild` for `MacVault-Direct` and `MacVault-AppStore` (unsigned) → both succeeded, 0 warnings
-- Bundled Direct build launched, created its database at schema v3, kept running
-- Perf smoke on `/Applications` (297k files, release): 41.6k files/s, against 42.1k for milestone 1 on the same tree
-- Code review of the full change: 10 findings, all fixed, each covered by a test where the logic is in the core
+## License
 
-**Not verified:** screens have not been clicked through or viewed (no screen-recording or accessibility permission in the build session). No XCUITests exist yet. Signing and notarization still need an Apple Developer account.
+[MIT](LICENSE) © 2026 Omprakash Chauhan
 
-**Next steps:**
-1. Click through every screen on a Mac, especially the approval sheet and the Trash flow on a throwaway folder.
-2. Add XCUITests for scan, cancel, review, approve and cancel-approval.
-3. Verify App Store sandbox behaviour (security-scoped bookmarks, review-only mode).
-4. Set up signing and notarization for the Direct edition.
-
-## Milestone 1 report (historical)
-
-**Implemented in core and tested:** a bounded, cancellable, symlink-safe scanner; inaccessible-item accounting; exclusions; mount boundaries; hard-link de-duplication; large-file findings; per-folder breakdown; versioned SQLite with migration upgrade and rollback; scan sessions, findings and issues; volume snapshots; audit log; reconciliation of interrupted scans; and retention.
-
-**Written but not compiled:** the SwiftUI app — Overview, Storage Analyzer, Activity and Settings screens, plus "Planned" screens for Cleaner, Applications, Duplicates and Developer Tools. The files pass a Swift syntax check (`swiftc -parse`), but SwiftUI cannot be type-checked off macOS.
-
-**Commands run and results (Linux, Swift 6.0.3):**
-- `swift build` → succeeded, no warnings in MacVaultCore
-- `swift test` → 42 tests: 40 passed, 2 skipped (real-permission test when running as root; perf test unless opted in), 0 failures
-- The real `chmod 000` permission test was run again as an unprivileged user → passed
-- Perf smoke test on `/usr` (release build): 135,219 files, 14,893 folders, 6.96 GB in 1.88 s (~72k files/s)
-
-**Known limitations:**
-- The macOS `URLResourceValues` volume path, bookmarks and all UI are untested.
-- Allocated size uses `st_blocks` and can overstate usage for APFS clones.
-- Breakdown covers only the root's immediate children; drill-down and treemap are planned.
-- Activity export is not built yet.
-
-**Next steps:**
-1. Build on a Mac and fix any type-check errors in the app target.
-2. Add UI tests for the scan, cancel and partial states.
-3. Verify the App Store edition sandbox and bookmark flow.
-4. Phase 2: cleanup rule engine, manifest and approval, and Trash execution with revalidation — gated by safety tests.
+MacVault isn't affiliated with or endorsed by Apple Inc. Mac and macOS are trademarks of Apple Inc.

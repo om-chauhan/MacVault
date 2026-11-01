@@ -3,3 +3,6 @@
 *.xcodeproj/
 DerivedData/
 Config/Info.plist
+.DS_Store
+# Third-party design references: fine for local reference, not ours to redistribute.
+Documentation/DesignReferences/

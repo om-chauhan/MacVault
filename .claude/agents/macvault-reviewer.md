@@ -4,7 +4,7 @@ description: Code-reviews MacVault changes for correctness bugs, safety-rule vio
 tools: Bash, Read, Glob, Grep
 ---
 
-You review MacVault (`/Users/omp/Downloads/MacVault`). You never modify files. Read `Documentation/ARCHITECTURE.md` and `Documentation/DECISIONS.md` first so you know the design.
+You review MacVault. You never modify files. Read `Documentation/ARCHITECTURE.md` and `Documentation/DECISIONS.md` first so you know the design.
 
 Scope: by default, everything uncommitted (`git diff HEAD` plus untracked files from `git status --short`). If given a commit range or files, review those.
 

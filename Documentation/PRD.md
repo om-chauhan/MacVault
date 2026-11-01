@@ -1,6 +1,6 @@
 # MacVault — Product Requirements
 
-> **Source note.** The original product pack (including `06_DATA_MODEL_AND_SQLITE_SCHEMA.md`) is not in this repository. This PRD was reconstructed on 2026-10-31 from the implemented product, the architecture decisions and the milestone reports. Treat it as the current baseline; where the original pack said something different, the pack's intent wins and this document should be corrected.
+> This PRD was reconstructed on 2026-10-31 from the implemented product, the architecture decisions and the milestone reports. Treat it as the current baseline.
 
 ## 1. Problem
 
@@ -34,7 +34,7 @@ MacVault is a native, local-only macOS app. It shows what uses space, and helps 
 
 ## 5. Functional requirements
 
-Each area lists requirements (R) and acceptance criteria (AC). Status is tracked in [FEATURE_STATUS.md](../FEATURE_STATUS.md).
+Each area lists requirements (R) and acceptance criteria (AC). Status is tracked in [FEATURE_STATUS.md](FEATURE_STATUS.md).
 
 ### 5.1 Overview
 - R: Show each mounted volume's capacity, used and available space (system-reported, with source and time), and the history of available space.

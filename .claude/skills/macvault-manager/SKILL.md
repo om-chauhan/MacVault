@@ -34,7 +34,7 @@ If an agent type isn't available in this session (agent files load when a sessio
    - Final status: core tests, both editions, UI tests (exact counts / SUCCEEDED or FAILED).
    - Each issue: what was wrong, the fix, the covering test.
    - Anything not fixed or not verified, plainly, with why.
-   - Make sure `FEATURE_STATUS.md` reflects only what the verifier actually saw pass.
+   - Make sure `Documentation/FEATURE_STATUS.md` reflects only what the verifier actually saw pass.
 
 ## Rules
 - Never accept a fix that weakens the safety model (only `OperationExecutor` + `FileTrasher` change files; `SafetyPolicy` applied twice; approval gate; per-item revalidation; DEBUG-only test hooks). If an agent proposes one, reject it and say why.

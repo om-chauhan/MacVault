@@ -1,13 +1,13 @@
 # MacVault Visual Direction
 
-The four images here are the visual reference for MacVault's UI. They are **style inspiration only** (third-party Dribbble/UI-kit shots): match their language, never copy their content, brands or data.
+This describes MacVault's visual language. It was distilled from four third-party reference shots (Dribbble and UI kits) that are **not distributed with this repository**, because they aren't ours to license. The table below records what was taken from each, and the notes refer to them as refs 01–04. Match the language, never the content, brands or data of the originals.
 
-| File | What to take from it |
+| Reference | What to take from it |
 |---|---|
-| `01-light-dashboard-cards.png` | Light theme baseline. White cards with large radius on a soft grey canvas. Card header: coloured icon, bold title, info glyph, actions grouped in a subtle pill (expand · edit · more). Huge bold numbers with small units ("94–127 BPM"), quiet grey labels above. Delta pills ("↑12% vs last year"). Bar chart with one highlighted bar, a value bubble and a dotted average line with a black "Avg" tag. Thin, light gridlines and axis labels. |
-| `02-dark-glow-report.png` | Dark theme. Near-black cards on a dark canvas with soft shadows. Monospaced tabular numbers. Vivid gradient data shapes that glow against black. Value labels in black pills on the chart. Clean table rows with hairline separators below the chart. |
-| `03-bold-color-tiles.png` | Bold tile mix: dark tiles next to saturated accent tiles (lime, violet, peach) with very large radius. Uppercase pill tags ("EXPENSES", "PERFORMANCE"). A segmented ring around a giant number. Legend rows: coloured dot, label, right-aligned percentage. Rounded bars with percentage labels on top. A weekly/monthly segmented switch inside the card. |
-| `04-apple-widgets.png` | Apple widget grid: small, medium and large tiles in a strict grid, consistent padding, system font, coloured tiles for single-purpose info, activity rings, compact lists with secondary lines. |
+| 01: light dashboard cards | Light theme baseline. White cards with large radius on a soft grey canvas. Card header: coloured icon, bold title, info glyph, actions grouped in a subtle pill (expand · edit · more). Huge bold numbers with small units ("94–127 BPM"), quiet grey labels above. Delta pills ("↑12% vs last year"). Bar chart with one highlighted bar, a value bubble and a dotted average line with a black "Avg" tag. Thin, light gridlines and axis labels. |
+| 02: dark glow report | Dark theme. Near-black cards on a dark canvas with soft shadows. Monospaced tabular numbers. Vivid gradient data shapes that glow against black. Value labels in black pills on the chart. Clean table rows with hairline separators below the chart. |
+| 03: bold colour tiles | Bold tile mix: dark tiles next to saturated accent tiles (lime, violet, peach) with very large radius. Uppercase pill tags ("EXPENSES", "PERFORMANCE"). A segmented ring around a giant number. Legend rows: coloured dot, label, right-aligned percentage. Rounded bars with percentage labels on top. A weekly/monthly segmented switch inside the card. |
+| 04: widget grid | Apple widget grid: small, medium and large tiles in a strict grid, consistent padding, system font, coloured tiles for single-purpose info, activity rings, compact lists with secondary lines. |
 
 ## Design language for MacVault
 

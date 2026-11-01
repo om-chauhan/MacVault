@@ -1,6 +1,6 @@
 # Architecture Decisions
 
-ADR-001…005 from the product pack are accepted unchanged (SwiftUI, local-first, review-first, one core/two editions, SQLite).
+ADR-001…005 (SwiftUI, local-first, review-first, one core/two editions, SQLite) were settled before this log started.
 
 ## ADR-006: Swift package with a platform-neutral core
 **Decision:** `MacVaultCore` (domain, scanner, persistence, services) is a SwiftPM library that builds on macOS **and Linux**; the SwiftUI app is a separate macOS-only target that depends on it.
@@ -25,7 +25,7 @@ ADR-001…005 from the product pack are accepted unchanged (SwiftUI, local-first
 **Trade-off:** Hand-written SQL; mitigated by round-trip tests.
 
 ## ADR-011: v1 schema kept verbatim, extensions in v2
-**Decision:** Migration 1 is exactly the schema in `06_DATA_MODEL_AND_SQLITE_SCHEMA.md`. Migration 2 adds scan-coverage columns (`root_path`, `allocated_bytes_observed`, `symlinks_skipped`, `excluded_items`, `mount_points_skipped`, `failure_reason`) plus `scan_directory_aggregates` and `scan_issues`.
+**Decision:** Migration 1 is the original schema, unchanged. Migration 2 adds scan-coverage columns (`root_path`, `allocated_bytes_observed`, `symlinks_skipped`, `excluded_items`, `mount_points_skipped`, `failure_reason`) plus `scan_directory_aggregates` and `scan_issues`.
 **Reason:** Exercises the migration path from day one.
 
 ## ADR-012: Persist top-N, not every file

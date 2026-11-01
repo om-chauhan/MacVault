@@ -4,7 +4,7 @@ import Charts
 import MacVaultCore
 
 // MacVault's design system. Every screen uses these tokens and components instead of one-off values.
-// Visual direction: Documentation/DesignReferences (widget cards on a quiet canvas, large radius,
+// Visual direction: Documentation/DESIGN.md (widget cards on a quiet canvas, large radius,
 // big rounded numbers, pills, Swift Charts with rings, highlighted bars and average rules).
 
 // MARK: - Tokens

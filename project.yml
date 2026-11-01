@@ -1,6 +1,5 @@
 # XcodeGen spec for a signed .app bundle with two editions.
 #   brew install xcodegen && xcodegen generate && open MacVault.xcodeproj
-# NOT VERIFIED: generated and built only on a Mac; see FEATURE_STATUS.md.
 name: MacVault
 options:
   bundleIdPrefix: com.macvault
@@ -37,7 +36,7 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.utilities
         LSMinimumSystemVersion: "14.0"
-        NSHumanReadableCopyright: ""
+        NSHumanReadableCopyright: "Copyright © 2026 Omprakash Chauhan. MIT License."
         # Shown in the macOS dialogs the permissions sheet triggers. Reading only; nothing is changed.
         NSDesktopFolderUsageDescription: "MacVault measures what uses space on your Desktop. It only reads; nothing is moved or deleted without your approval."
         NSDocumentsFolderUsageDescription: "MacVault measures what uses space in Documents. It only reads; nothing is moved or deleted without your approval."

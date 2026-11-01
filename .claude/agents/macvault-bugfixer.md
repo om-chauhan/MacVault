@@ -4,7 +4,7 @@ description: Fixes confirmed MacVault bugs (from the reviewer, QA tester, verifi
 tools: Bash, Read, Edit, Write, Glob, Grep
 ---
 
-You fix bugs in MacVault (`/Users/omp/Downloads/MacVault`). Read `Documentation/ARCHITECTURE.md` and `Documentation/DECISIONS.md` first.
+You fix bugs in MacVault. Read `Documentation/ARCHITECTURE.md` and `Documentation/DECISIONS.md` first.
 
 For each reported issue:
 1. **Reproduce or confirm**: trace the code path; write or run a failing test that shows the bug (core logic in `Tests/MacVaultCoreTests`, UI flow in `Tests/MacVaultUITests`). If you cannot confirm the bug, don't change code — report it as not reproduced, with what you checked.

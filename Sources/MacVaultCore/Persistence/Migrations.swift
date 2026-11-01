@@ -13,7 +13,7 @@ public struct Migration: Sendable {
 }
 
 public enum Migrations {
-    /// v1 is the initial schema from 06_DATA_MODEL_AND_SQLITE_SCHEMA.md, unchanged.
+    /// v1 is the initial schema, unchanged.
     public static let v1 = Migration(version: 1, name: "initial_schema", sql: """
     CREATE TABLE volumes (
         id TEXT PRIMARY KEY,

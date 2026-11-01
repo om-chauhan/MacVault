@@ -2,11 +2,11 @@
 
 Status labels: **Implemented** (real behavior exists *and* is covered by tests that were run), **Partial**, **Planned**, **Blocked**.
 
-Last verified: 2026-10-30, milestone 2 (all planned phases). Verification environment: macOS 27.0.1 (Apple silicon), Xcode 27.1, Swift 6.4.
+Last verified: 2026-11-02. Verification environment: macOS 27.2 (Apple silicon), Xcode 27.1, Swift 6.4. Milestone 2 (all planned phases) was verified on 2026-10-30.
 
-**What was verified for the app:** both Xcode schemes (`MacVault-Direct`, `MacVault-AppStore`) and `swift build` compile with zero warnings; the bundled Direct build launches, creates its database at schema v3 and stays running. **What was not verified:** the screens have not been exercised interactively or visually (this session had no screen-recording or accessibility permission). Every app-only row below is therefore at most **Partial** until it is clicked through on a Mac. The safety-critical logic behind every screen lives in `MacVaultCore` and is fully tested.
+**What was verified for the app:** both Xcode schemes (`MacVault-Direct`, `MacVault-AppStore`) and `swift build` compile with zero warnings; the bundled Direct build launches, creates its database at schema v3 and stays running. **What was not verified:** the screens have been driven by UI tests on sample data, but not used by hand against a real home folder. Every app-only row below is therefore at most **Partial** until it is clicked through on a Mac. The safety-critical logic behind every screen lives in `MacVaultCore` and is fully tested.
 
-## Core (tested: 115 tests, 1 opt-in perf test skipped, 0 failures)
+## Core (tested: 120 tests, 1 opt-in perf test skipped, 0 failures)
 
 | Capability | Status | Evidence / notes |
 |---|---|---|
@@ -49,7 +49,7 @@ Last verified: 2026-10-30, milestone 2 (all planned phases). Verification enviro
 | In-use checks before moving (running app, Xcode/Simulator for their caches) | **Partial** | Compiled; uses `NSRunningApplication` |
 | Menu bar extra; scheduled read-only scans while open; low-storage notifications | **Partial** | Compiled. Notifications need the bundled app; under `swift run` they are skipped and events still go to Activity |
 | Folder access via bookmarks (security-scoped in App Store edition) | **Partial** | Needs on-device verification in both editions |
-| UI tests (XCUITest) | **Planned** | Not written: needs a Mac session with accessibility permission to run |
+| UI tests (XCUITest) | **Partial** | `Tests/MacVaultUITests` has end-to-end flows and screenshot capture. Not run in CI. On 2026-11-02 the screenshot pass completed in dark appearance at the large window size, visiting every screen; the other three passes were interrupted by someone using the Mac, so they are unverified |
 | App Store build / Direct build signing & notarization | **Blocked** | Requires an Apple Developer account and signing identities |
 
 ## Safety invariants

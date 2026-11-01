@@ -2,7 +2,7 @@
 
 MacVault is a native macOS storage app. It measures what uses space, then helps you remove caches, build output, unused apps and duplicate files — but only items you reviewed and approved, and only by moving them to the Trash. Everything runs locally; nothing is sent anywhere.
 
-The design decisions behind this document, and their trade-offs, are recorded as ADRs in [DECISIONS.md](DECISIONS.md). Edition differences are in [CAPABILITY_MATRIX.md](CAPABILITY_MATRIX.md). What is verified is in [FEATURE_STATUS.md](../FEATURE_STATUS.md).
+The design decisions behind this document, and their trade-offs, are recorded as ADRs in [DECISIONS.md](DECISIONS.md). Edition differences are in [CAPABILITY_MATRIX.md](CAPABILITY_MATRIX.md). What is verified is in [FEATURE_STATUS.md](FEATURE_STATUS.md).
 
 ## 1. Shape of the system
 
@@ -62,8 +62,9 @@ Sources/MacVaultCore/
 Sources/MacVaultApp/
   App/             MacVaultApp (scenes, menu bar), AppModel, OperationsModel, FeatureModels,
                    AccessCoordinator, AppSettings, AppEnvironment, Notifier
-  Features/        one file per screen + ReviewComponents (rows, approval sheet, status, history)
-                   + BreakdownViews (drill-down list, treemap)
+  Features/        one file per screen, plus the permissions sheet
+  Components/      views shared by screens: ReviewComponents (rows, approval sheet, status, history),
+                   BreakdownViews (drill-down list, treemap), StartScreen
   DesignSystem/    spacing, cards, badges, banners
 Tests/MacVaultCoreTests/   core unit + isolated-filesystem integration tests
 Tests/MacVaultUITests/     XCUITest end-to-end flows against a fixture
